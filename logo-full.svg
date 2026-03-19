@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 100" fill="none">
+  <defs>
+    <linearGradient id="g" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#a0aaff"/>
+      <stop offset="100%" stop-color="#6070ef"/>
+    </linearGradient>
+  </defs>
+  <!-- Woven A mark — outline -->
+  <g stroke="#1a1a2e" stroke-width="10" stroke-linecap="round" opacity="0.35">
+    <line x1="22" y1="88" x2="31" y2="64"/>
+    <line x1="36" y1="52" x2="50" y2="15"/>
+    <line x1="9" y1="58" x2="59.5" y2="58"/>
+    <line x1="73.5" y1="58" x2="91" y2="58"/>
+    <line x1="50" y1="15" x2="78" y2="88"/>
+  </g>
+  <!-- Woven A mark — main strokes -->
+  <g stroke="url(#g)" stroke-width="6" stroke-linecap="round">
+    <line x1="22" y1="88" x2="31" y2="64"/>
+    <line x1="36" y1="52" x2="50" y2="15"/>
+    <line x1="9" y1="58" x2="59.5" y2="58"/>
+    <line x1="73.5" y1="58" x2="91" y2="58"/>
+    <line x1="50" y1="15" x2="78" y2="88"/>
+  </g>
+  <!-- Wordmark — outline -->
+  <text x="112" y="66" font-family="'SF Pro Display', -apple-system, 'Helvetica Neue', Arial, sans-serif"
+        font-size="40" font-weight="300" fill="none" stroke="#1a1a2e" stroke-width="3" letter-spacing="3" opacity="0.35">airloom</text>
+  <!-- Wordmark — main -->
+  <text x="112" y="66" font-family="'SF Pro Display', -apple-system, 'Helvetica Neue', Arial, sans-serif"
+        font-size="40" font-weight="300" fill="url(#g)" letter-spacing="3">airloom</text>
+</svg>

@@ -1,0 +1,24 @@
+{
+  "name": "@airloom/viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@airloom/channel": "workspace:*",
+    "@airloom/crypto": "workspace:*",
+    "@airloom/protocol": "workspace:*",
+    "@noble/hashes": "^1.7.0",
+    "html5-qrcode": "^2.3.8",
+    "marked": "^17.0.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-node-polyfills": "^0.25.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}

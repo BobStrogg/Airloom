@@ -1,0 +1,11 @@
+{
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/crypto" },
+    { "path": "packages/channel" },
+    { "path": "packages/relay" },
+    { "path": "apps/host" },
+    { "path": "apps/viewer" }
+  ],
+  "files": []
+}
