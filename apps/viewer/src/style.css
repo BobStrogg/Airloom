@@ -25,11 +25,14 @@ html, body {
 
 #app { height: 100dvh; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .screen { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#chatScreen { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
 .connect-content {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   padding: 24px; gap: 16px;
+  padding-top: calc(24px + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
 }
 .connect-content h1 { font-size: 2rem; color: var(--accent); font-weight: 700; margin-top: -4px; }
 .subtitle { color: var(--text-muted); font-size: 0.95rem; margin-top: -8px; }
@@ -75,20 +78,28 @@ html, body {
 
 .chat-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  padding: 12px 16px; background: rgba(26, 26, 26, 0.7); flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  position: sticky; top: 0; z-index: 10;
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 .header-info { display: flex; align-items: center; gap: 10px; }
 .header-info h2 { font-size: 1.1rem; color: var(--accent); }
 
 .status-badge { font-size: 0.7rem; padding: 3px 8px; border-radius: 10px; background: var(--success); color: #fff; font-weight: 600; }
 .status-badge.disconnected { background: var(--error); }
+.status-badge.reconnecting { background: #ff9800; }
 
 .icon-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 8px; border-radius: 8px; }
 .icon-btn:hover { background: var(--border); }
 
 .messages {
-  flex: 1; overflow-y: auto; padding: 16px; display: flex;
-  flex-direction: column; gap: 8px; min-height: 0; -webkit-overflow-scrolling: touch;
+  flex: 1; padding: 16px; display: flex;
+  flex-direction: column; gap: 8px;
 }
 
 .msg {
@@ -145,7 +156,14 @@ html, body {
 
 .input-bar {
   display: flex; align-items: flex-end; gap: 8px; padding: 12px 16px;
-  background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0;
+  background: rgba(26, 26, 26, 0.7); flex-shrink: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  position: sticky; bottom: 0; z-index: 10;
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 .input-bar textarea {
   flex: 1; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border);

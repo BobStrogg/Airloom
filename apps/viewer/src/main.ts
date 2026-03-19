@@ -57,6 +57,25 @@ let channel: Channel | null = null;
 let currentStreamEl: HTMLDivElement | null = null;
 let currentStreamText = '';
 
+// Persist last connection params so the user can easily reconnect (especially in PWA)
+function saveConnectionParams(code: string | null, relayUrl: string) {
+  try {
+    if (code) localStorage.setItem('airloom:lastCode', code);
+    localStorage.setItem('airloom:lastRelay', relayUrl);
+  } catch { /* localStorage may be unavailable in some contexts */ }
+}
+
+function restoreConnectionParams() {
+  try {
+    const code = localStorage.getItem('airloom:lastCode');
+    const relay = localStorage.getItem('airloom:lastRelay');
+    if (code && !codeInput.value) codeInput.value = code;
+    if (relay && !relayInput.value) relayInput.value = relay;
+  } catch { /* ignore */ }
+}
+
+restoreConnectionParams();
+
 // Auto-format code input with dash
 codeInput.addEventListener('input', () => {
   let v = codeInput.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
@@ -98,6 +117,7 @@ disconnectBtn.addEventListener('click', () => {
   chatScreen.style.display = 'none';
   connectScreen.style.display = 'flex';
   messagesEl.innerHTML = '';
+  restoreConnectionParams();
 });
 
 // Auto-connect if URL hash contains base64url-encoded pairing data
@@ -117,6 +137,7 @@ async function connectWithCode() {
   const raw = parsePairingCode(codeInput.value);
   if (raw.length !== 8) { showError('Code must be 8 characters'); return; }
   const relayUrl = relayInput.value.trim() || 'ws://localhost:4500';
+  saveConnectionParams(codeInput.value, relayUrl);
   const sessionToken = deriveSessionToken(raw);
   const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + sessionToken));
   const encryptionKey = deriveEncryptionKey(keyMaterial);
@@ -126,6 +147,7 @@ async function connectWithCode() {
 async function connectWithQR(qrText: string) {
   try {
     const data = decodePairingData(qrText);
+    saveConnectionParams(null, data.relay);
     const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + data.session));
     const encryptionKey = deriveEncryptionKey(keyMaterial);
     const transport = data.transport ?? 'ws';
@@ -187,8 +209,8 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     });
     channel.on('error', (err: Error) => console.error('Channel error:', err));
     channel.on('disconnect', () => {
-      chatStatus.textContent = 'Disconnected';
-      chatStatus.className = 'status-badge disconnected';
+      chatStatus.textContent = 'Reconnecting…';
+      chatStatus.className = 'status-badge reconnecting';
     });
 
     await channel.connect(sessionToken);
