@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/crypto" },
+    { "path": "../../packages/channel" }
+  ]
+}

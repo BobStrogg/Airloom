@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Airloom</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- Shared SVG gradient definition (referenced by inline logo marks) -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0" aria-hidden="true">
+    <defs>
+      <linearGradient id="logo-g" x1="0.3" y1="0" x2="0.7" y2="1">
+        <stop offset="0%" stop-color="#a0aaff"/>
+        <stop offset="100%" stop-color="#6070ef"/>
+      </linearGradient>
+    </defs>
+  </svg>
+  <div id="app">
+    <div id="connectScreen" class="screen">
+      <div class="connect-content">
+        <svg class="logo-mark-lg" viewBox="0 0 100 100" fill="none" aria-label="Airloom logo">
+          <g stroke="url(#logo-g)" stroke-width="6" stroke-linecap="round">
+            <line x1="22" y1="88" x2="31" y2="64"/><line x1="36" y1="52" x2="50" y2="15"/>
+            <line x1="9" y1="58" x2="59.5" y2="58"/><line x1="73.5" y1="58" x2="91" y2="58"/>
+            <line x1="50" y1="15" x2="78" y2="88"/>
+          </g>
+        </svg>
+        <h1>Airloom</h1>
+        <p class="subtitle">Connect to your AI session</p>
+        <div class="connect-methods">
+          <button id="scanBtn" class="primary-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/>
+              <rect x="7" y="7" width="10" height="10" rx="1"/>
+            </svg>
+            Scan QR Code
+          </button>
+          <div class="divider"><span>or enter code</span></div>
+          <div class="code-input-group">
+            <input type="text" id="codeInput" placeholder="ABCD-1234" maxlength="9" autocapitalize="characters" autocomplete="off" />
+            <button id="joinBtn" class="secondary-btn">Connect</button>
+          </div>
+          <div class="relay-config">
+            <input type="text" id="relayInput" placeholder="Relay URL (default: ws://localhost:4500)" />
+          </div>
+        </div>
+        <div id="qrReader" style="display:none"></div>
+        <p id="connectError" class="error" style="display:none"></p>
+        <p id="connectStatus" class="status-text" style="display:none"></p>
+      </div>
+    </div>
+    <div id="chatScreen" class="screen" style="display:none">
+      <header class="chat-header">
+        <div class="header-info">
+          <svg class="logo-mark-sm" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+            <g stroke="url(#logo-g)" stroke-width="6" stroke-linecap="round">
+              <line x1="22" y1="88" x2="31" y2="64"/><line x1="36" y1="52" x2="50" y2="15"/>
+              <line x1="9" y1="58" x2="59.5" y2="58"/><line x1="73.5" y1="58" x2="91" y2="58"/>
+              <line x1="50" y1="15" x2="78" y2="88"/>
+            </g>
+          </svg>
+          <h2>Airloom</h2>
+          <span id="chatStatus" class="status-badge">Connected</span>
+        </div>
+        <button id="disconnectBtn" class="icon-btn" title="Disconnect">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </header>
+      <div id="messages" class="messages"></div>
+      <div class="input-bar">
+        <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+        <button id="sendBtn" class="send-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
