@@ -1,7 +1,7 @@
 {
   "name": "airloom-monorepo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Secure, E2E encrypted device-to-device streaming relay",
   "scripts": {
     "dev:relay": "tsx packages/relay/src/main.ts",
