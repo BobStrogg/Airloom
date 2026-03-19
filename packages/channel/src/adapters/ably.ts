@@ -62,6 +62,14 @@ export class AblyAdapter implements RelayAdapter {
     });
     this.ably.connection.on('connected', () => {
       this._connected = true;
+      // After reconnection, re-check if peer is still present so the UI
+      // can transition back from "Disconnected" / "Reconnecting…" to "Connected".
+      if (this.channel) {
+        this.channel.presence.get().then((members) => {
+          const hasPeer = members.some((m) => m.clientId !== this.clientId);
+          if (hasPeer) this.peerJoinedHandlers.forEach((h) => h());
+        }).catch(() => {});
+      }
     });
     this.ably.connection.on('failed', (stateChange) => {
       this._connected = false;

@@ -7,7 +7,8 @@
     "airloom": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "dependencies": {
     "@noble/hashes": "^1.7.0",
@@ -35,5 +36,15 @@
     "node": ">=18"
   },
   "keywords": ["ai", "remote", "phone", "relay", "encrypted", "e2e", "ably"],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "Chris Cavanagh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BobStrogg/Airloom.git",
+    "directory": "apps/host"
+  },
+  "homepage": "https://github.com/BobStrogg/Airloom#readme",
+  "bugs": {
+    "url": "https://github.com/BobStrogg/Airloom/issues"
+  }
 }
