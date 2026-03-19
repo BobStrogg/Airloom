@@ -255,14 +255,11 @@ async function main() {
   const lanIP = getLanIP();
   const host = lanIP ?? 'localhost';
   const baseUrl = `http://${host}:${port}`;
-  let qrContent: string;
-  if (viewerDir) {
-    // Encode pairing data as base64 in the URL hash — viewer reads it on load
-    const pairingBase64 = Buffer.from(pairingJSON).toString('base64url');
-    qrContent = `${baseUrl}/viewer/#${pairingBase64}`;
-  } else {
-    qrContent = pairingJSON; // fallback: raw JSON
-  }
+  const pairingBase64 = Buffer.from(pairingJSON).toString('base64url');
+  // Point to the bundled viewer app, or fall back to the host page with pairing hash
+  const qrContent = viewerDir
+    ? `${baseUrl}/viewer/#${pairingBase64}`
+    : `${baseUrl}/#${pairingBase64}`;
 
   const qrDataUrl = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
   const qrTerminal = await QRCode.toString(qrContent, { type: 'terminal', small: true });
@@ -271,7 +268,7 @@ async function main() {
   console.log('\nPairing QR Code:');
   console.log(qrTerminal);
   console.log(`Pairing Code: ${displayCode}`);
-  if (viewerDir && lanIP) {
+  if (lanIP) {
     console.log(`Viewer URL: ${qrContent}`);
   }
   if (!useAbly) console.log(`Relay: ${RELAY_URL}`);
