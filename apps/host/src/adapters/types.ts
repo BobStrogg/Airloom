@@ -6,6 +6,9 @@ export interface AIAdapter {
     stream: WriteStream,
   ): Promise<void>;
 
+  /** Clean up resources (kill child processes, etc.). */
+  destroy?(): void;
+
   readonly name: string;
   readonly model: string;
 }

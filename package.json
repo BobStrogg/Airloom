@@ -9,7 +9,8 @@
     "dev:viewer": "pnpm --filter @airloom/viewer dev",
     "build": "pnpm -r build",
     "build:pages": "pnpm --filter @airloom/viewer build:pages",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "postinstall": "node scripts/fix-permissions.mjs"
   },
   "engines": {
     "node": ">=18"
