@@ -148,7 +148,10 @@ async function main() {
     // Mint a scoped, time-limited token for the viewer using Ably REST API.
     // The API key (default or custom) never leaves the host.
     const { Rest } = await import('ably');
-    const rest = new Rest({ key: ABLY_API_KEY! });
+    const rest = new Rest({
+      key: ABLY_API_KEY!,
+      queryTime: true,
+    });
     const channelName = `airloom:${session.sessionToken}`;
     const tokenDetails = await rest.auth.requestToken({
       clientId: '*', // viewer picks its own clientId
