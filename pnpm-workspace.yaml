@@ -2,4 +2,13 @@ packages:
   - 'packages/*'
   - 'apps/*'
 allowBuilds:
+  '-': true
+  d: true
+  e: true
   esbuild: true
+  n: true
+  node-pty: true
+  o: true
+  p: true
+  t: true
+  y: true
