@@ -70,6 +70,7 @@ Environment variables:
   OPENAI_API_KEY      API key for the OpenAI adapter.
   ABLY_API_KEY        Your own Ably key (overrides default community relay).
   RELAY_URL           Self-hosted WebSocket relay URL (disables Ably).
+  VIEWER_URL          Public viewer URL (default: GitHub Pages).
   HOST_PORT           Same as --port (CLI flag takes precedence).
 `.trimStart());
 }
@@ -84,6 +85,11 @@ if (cliArgs.help) {
 // Default community relay key — restricted to airloom:* channels (publish/subscribe/presence only).
 // Users can override with ABLY_API_KEY for their own quota, or set RELAY_URL for self-hosted WS.
 const DEFAULT_ABLY_KEY = 'SfHSAQ.IRTOQQ:FBbi9a7ZV6jIu0Gdo_UeYhIN4rzpMrud5-LldURNh9s';
+
+// Public viewer URL (GitHub Pages). Pairing data goes in the hash fragment,
+// which is never sent to the server — only the browser sees it.
+const DEFAULT_VIEWER_URL = 'https://bobstrogg.github.io/Airloom/';
+const VIEWER_URL = process.env.VIEWER_URL ?? DEFAULT_VIEWER_URL;
 
 const RELAY_URL = process.env.RELAY_URL;
 const ABLY_API_KEY = process.env.ABLY_API_KEY ?? (RELAY_URL ? undefined : DEFAULT_ABLY_KEY);
@@ -251,15 +257,19 @@ async function main() {
 
   const { server, broadcast, port } = await createHostServer({ port: HOST_PORT, state, viewerDir });
 
-  // Build the QR content — a URL that opens the viewer on the phone
-  const lanIP = getLanIP();
-  const host = lanIP ?? 'localhost';
-  const baseUrl = `http://${host}:${port}`;
+  // Build the QR content — a URL that opens the viewer on the phone.
+  // Uses the public viewer URL (GitHub Pages) by default so the phone doesn't
+  // need LAN access. Pairing data lives in the hash fragment, which is never
+  // sent to the hosting server — only the browser sees it.
   const pairingBase64 = Buffer.from(pairingJSON).toString('base64url');
-  // Point to the bundled viewer app, or fall back to the host page with pairing hash
-  const qrContent = viewerDir
-    ? `${baseUrl}/viewer/#${pairingBase64}`
-    : `${baseUrl}/#${pairingBase64}`;
+  const viewerBase = VIEWER_URL.replace(/\/+$/, '');
+  const qrContent = `${viewerBase}/#${pairingBase64}`;
+
+  // Also build a LAN URL for local/dev use
+  const lanIP = getLanIP();
+  const lanHost = lanIP ?? 'localhost';
+  const lanBaseUrl = `http://${lanHost}:${port}`;
+  const lanViewerUrl = viewerDir ? `${lanBaseUrl}/viewer/#${pairingBase64}` : null;
 
   const qrDataUrl = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
   const qrTerminal = await QRCode.toString(qrContent, { type: 'terminal', small: true });
@@ -268,8 +278,9 @@ async function main() {
   console.log('\nPairing QR Code:');
   console.log(qrTerminal);
   console.log(`Pairing Code: ${displayCode}`);
-  if (lanIP) {
-    console.log(`Viewer URL: ${qrContent}`);
+  console.log(`Viewer URL: ${qrContent}`);
+  if (lanViewerUrl) {
+    console.log(`LAN Viewer:  ${lanViewerUrl}`);
   }
   if (!useAbly) console.log(`Relay: ${RELAY_URL}`);
 
