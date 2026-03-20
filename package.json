@@ -8,6 +8,7 @@
     "dev:host": "tsx apps/host/src/index.ts",
     "dev:viewer": "pnpm --filter @airloom/viewer dev",
     "build": "pnpm -r build",
+    "build:pages": "pnpm --filter @airloom/viewer build:pages",
     "typecheck": "tsc --build"
   },
   "engines": {
