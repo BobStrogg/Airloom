@@ -203,17 +203,22 @@ async function main() {
   if (cliArgs.cli || cliArgs.preset) {
     // --cli or --preset provided on the command line
     let command = cliArgs.cli;
-    if (!command && cliArgs.preset) {
-      const preset = CLI_PRESETS.find((p) => p.id === cliArgs.preset);
-      if (!preset) {
+    let presetInfo: (typeof CLI_PRESETS)[number] | undefined;
+    if (cliArgs.preset) {
+      presetInfo = CLI_PRESETS.find((p) => p.id === cliArgs.preset);
+      if (!presetInfo) {
         console.error(`[host] Unknown preset "${cliArgs.preset}". Available: ${CLI_PRESETS.map((p) => p.id).join(', ')}`);
         process.exit(1);
       }
-      command = preset.command;
+      if (!command) command = presetInfo.command;
     }
     if (command) {
-      state.adapter = new CLIAdapter({ command });
-      console.log(`[host] CLI adapter: ${command}`);
+      state.adapter = new CLIAdapter({
+        command,
+        mode: presetInfo?.mode,
+        silenceTimeout: presetInfo?.silenceTimeout,
+      });
+      console.log(`[host] CLI adapter: ${command} (${presetInfo?.mode ?? 'oneshot'})`);
     }
   } else {
     // Fall back to saved config file
@@ -233,7 +238,14 @@ async function main() {
           }
           case 'cli': {
             const cmd = saved.command || process.env.AIRLOOM_CLI_COMMAND;
-            if (cmd) { state.adapter = new CLIAdapter({ command: cmd, model: saved.model }); }
+            const savedPreset = saved.preset ? CLI_PRESETS.find((p) => p.id === saved.preset) : undefined;
+            if (cmd) {
+              state.adapter = new CLIAdapter({
+                command: cmd, model: saved.model,
+                mode: savedPreset?.mode,
+                silenceTimeout: savedPreset?.silenceTimeout,
+              });
+            }
             break;
           }
         }
@@ -330,6 +342,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('\n[host] Shutting down...');
+    state.adapter?.destroy?.();
     try { channel.close(); } catch { /* Ably may throw if already detached */ }
     server.close(() => process.exit(0));
     // Force exit if server doesn't close within 1s

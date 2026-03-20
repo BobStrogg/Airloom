@@ -103,7 +103,13 @@ export function createHostServer(opts: {
         case 'cli': {
           const cmd = command || process.env.AIRLOOM_CLI_COMMAND;
           if (!cmd) { res.status(400).json({ error: 'CLI adapter requires a command (or set AIRLOOM_CLI_COMMAND env var)' }); return; }
-          opts.state.adapter = new CLIAdapter({ command: cmd, model });
+          // Look up preset to get mode & silenceTimeout
+          const presetInfo = preset ? CLI_PRESETS.find((p) => p.id === preset) : undefined;
+          opts.state.adapter = new CLIAdapter({
+            command: cmd, model,
+            mode: presetInfo?.mode,
+            silenceTimeout: presetInfo?.silenceTimeout,
+          });
           break;
         }
         default: res.status(400).json({ error: 'Unknown adapter type' }); return;
@@ -170,17 +176,27 @@ export async function handleAIResponse(
   const stream = channel.createStream({ model: adapter.model });
   let fullResponse = '';
 
-  const batcher = new Batcher({
+  // UI batcher — fast updates for the host web UI (local WebSocket, cheap)
+  const uiBatcher = new Batcher({
     interval: 100,
     onFlush: (data: string) => broadcast({ type: 'stream_chunk', data }),
   });
 
+  // Relay batcher — slower cadence to reduce Ably message costs.
+  // Each flush is an Ably publish, so batching at 500ms significantly reduces message count.
   const origWrite = stream.write.bind(stream);
-  stream.write = (data: string) => { fullResponse += data; batcher.write(data); origWrite(data); };
+  const relayBatcher = new Batcher({
+    interval: 500,
+    maxBytes: 4096,
+    onFlush: (data: string) => origWrite(data),
+  });
+
+  stream.write = (data: string) => { fullResponse += data; uiBatcher.write(data); relayBatcher.write(data); };
 
   const origEnd = stream.end.bind(stream);
   stream.end = () => {
-    batcher.flush();
+    uiBatcher.flush();
+    relayBatcher.flush();
     broadcast({ type: 'stream_end' });
     state.messages.push({ role: 'assistant', content: fullResponse, timestamp: Date.now() });
     trimMessages(state.messages);
@@ -195,7 +211,8 @@ export async function handleAIResponse(
       stream.write(`[Error: ${message}]`);
       stream.end();
     }
-    batcher.destroy();
+    uiBatcher.destroy();
+    relayBatcher.destroy();
   }
 }
 
