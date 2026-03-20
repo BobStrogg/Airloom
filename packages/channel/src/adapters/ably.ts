@@ -36,7 +36,11 @@ export class AblyAdapter implements RelayAdapter {
   async connect(sessionToken: string, role: 'host' | 'viewer'): Promise<void> {
     this.clientId = `airloom-${role}-${Date.now()}`;
 
-    const clientOpts: ClientOptions = { clientId: this.clientId };
+    const clientOpts: ClientOptions = { 
+      clientId: this.clientId,
+      // Enable server time sync to avoid "Timestamp not current" errors on machines with clock skew
+      queryTime: true 
+    };
     if (this.opts.key) {
       clientOpts.key = this.opts.key;
     } else {
