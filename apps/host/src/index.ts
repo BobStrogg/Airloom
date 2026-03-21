@@ -15,7 +15,7 @@ import { loadConfig, getConfigPath } from './config.js';
 import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { CLIAdapter, CLI_PRESETS } from './adapters/cli.js';
-import { TerminalSession, isTerminalMessage } from './terminal.js';
+import { TerminalSession, getTerminalLaunchDisplay, isTerminalMessage } from './terminal.js';
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing (lightweight, no dependencies)
@@ -193,6 +193,14 @@ async function main() {
   await channel.connect(session.sessionToken);
   console.log('[host] Connected to relay, waiting for phone...');
 
+  const launchPreset = cliArgs.preset ? CLI_PRESETS.find((p) => p.id === cliArgs.preset) : undefined;
+  if (cliArgs.preset && !launchPreset) {
+    console.error(`[host] Unknown preset "${cliArgs.preset}". Available: ${CLI_PRESETS.map((p) => p.id).join(', ')}`);
+    process.exit(1);
+  }
+  const launchCommand = cliArgs.cli ?? launchPreset?.command;
+  const terminalLaunch = getTerminalLaunchDisplay(launchCommand);
+
   const state: ServerState = {
     channel,
     adapter: null,
@@ -200,22 +208,18 @@ async function main() {
     pairingQR: '', // set after server starts
     relayUrl: useAbly ? 'ably' : RELAY_URL!,
     connected: false,
+    terminalLaunch,
     messages: [],
   };
+
+  console.log(`[host] Terminal launch: ${terminalLaunch}`);
 
   // Configure adapter: CLI args take precedence, then saved config, then env vars.
   if (cliArgs.cli || cliArgs.preset) {
     // --cli or --preset provided on the command line
     let command = cliArgs.cli;
-    let presetInfo: (typeof CLI_PRESETS)[number] | undefined;
-    if (cliArgs.preset) {
-      presetInfo = CLI_PRESETS.find((p) => p.id === cliArgs.preset);
-      if (!presetInfo) {
-        console.error(`[host] Unknown preset "${cliArgs.preset}". Available: ${CLI_PRESETS.map((p) => p.id).join(', ')}`);
-        process.exit(1);
-      }
-      if (!command) command = presetInfo.command;
-    }
+    const presetInfo = launchPreset;
+    if (presetInfo && !command) command = presetInfo.command;
     if (command) {
       state.adapter = new CLIAdapter({
         command,
@@ -309,7 +313,7 @@ async function main() {
     exec(`${cmd} ${localUrl}`);
   }).catch(() => {});
 
-  const terminal = new TerminalSession(channel);
+  const terminal = new TerminalSession(channel, launchCommand);
 
   // Channel events
   channel.on('ready', () => {

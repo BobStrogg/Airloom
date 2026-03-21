@@ -35,8 +35,8 @@ function parseCommand(command: string): { file: string; args: string[] } {
   };
 }
 
-function getDefaultTerminalCommand(): { file: string; args: string[] } {
-  const configured = process.env.AIRLOOM_TERMINAL_COMMAND?.trim();
+function getDefaultTerminalCommand(explicitCommand?: string): { file: string; args: string[] } {
+  const configured = explicitCommand?.trim() || process.env.AIRLOOM_TERMINAL_COMMAND?.trim();
   if (configured) return parseCommand(configured);
   if (process.platform === 'win32') {
     const file = process.env.COMSPEC || 'powershell.exe';
@@ -101,6 +101,11 @@ class AdaptiveOutputBatcher {
   }
 }
 
+export function getTerminalLaunchDisplay(explicitCommand?: string): string {
+  const command = getDefaultTerminalCommand(explicitCommand);
+  return [command.file, ...command.args].join(' ');
+}
+
 export class TerminalSession {
   private pty: IPty | null = null;
   private stream: WriteStream | null = null;
@@ -108,7 +113,10 @@ export class TerminalSession {
   private cols = 120;
   private rows = 36;
 
-  constructor(private readonly channel: Channel) {}
+  constructor(
+    private readonly channel: Channel,
+    private readonly launchCommand?: string,
+  ) {}
 
   handleMessage(message: TerminalMessage): void {
     switch (message.type) {
@@ -146,7 +154,7 @@ export class TerminalSession {
       return;
     }
 
-    const command = getDefaultTerminalCommand();
+    const command = getDefaultTerminalCommand(this.launchCommand);
     const file = resolveExecutable(command.file) ?? command.file;
     const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
