@@ -100,10 +100,10 @@ const DEFAULT_ABLY_KEY = 'SfHSAQ.IRTOQQ:FBbi9a7ZV6jIu0Gdo_UeYhIN4rzpMrud5-LldURN
 const DEFAULT_VIEWER_URL = 'https://bobstrogg.github.io/Airloom/';
 const VIEWER_URL = process.env.VIEWER_URL ?? DEFAULT_VIEWER_URL;
 
-// Dev mode: running from source via tsx (import.meta.url contains /src/).
+// Dev mode: running from local repo (not from npm/node_modules).
 // When true, the QR code points to the locally-served LAN viewer so the phone
 // uses the latest local build instead of the published GitHub Pages version.
-const IS_DEV = !process.env.VIEWER_URL && new URL(import.meta.url).pathname.includes('/src/');
+const IS_DEV = !process.env.VIEWER_URL && !new URL(import.meta.url).pathname.includes('node_modules');
 
 const RELAY_URL = process.env.RELAY_URL;
 const ABLY_API_KEY = process.env.ABLY_API_KEY ?? (RELAY_URL ? undefined : DEFAULT_ABLY_KEY);
