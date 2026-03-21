@@ -40,15 +40,39 @@ function fixSpawnHelperPermissions(): void {
 fixSpawnHelperPermissions();
 
 /**
- * Strip OSC color query responses that xterm.js generates automatically.
- * The full form is ESC ] <id> ; rgb:RRRR/GGGG/BBBB ESC \ but the ESC bytes
- * may be stripped or split during channel transport, leaving bare fragments
- * like "10;rgb:e6e6/eded/f3f3".  We match both forms.
+ * Strip auto-generated terminal query responses that leak from xterm.js.
+ *
+ * xterm.js responds to various terminal queries (DA, DSR, CPR, OSC color,
+ * window-size, mode reports).  These responses are CSI/OSC sequences that
+ * the ESC byte may be stripped from during channel transport, leaving bare
+ * fragments like "?1;2c" or "10;rgb:e6e6/eded/f3f3".
+ *
+ * We match both full (ESC-prefixed) and bare forms.  The patterns cover:
+ *   - OSC color responses:  10;rgb:…  11;rgb:…  4;N;rgb:…
+ *   - DA responses:         ?1;2c  ?6c  >0;276;0c  etc.
+ *   - DSR:                  0n  3n  etc.
+ *   - CPR:                  <row>;<col>R   ?<row>;<col>R
+ *   - Window/cell reports:  4;<h>;<w>t  6;<h>;<w>t  8;<r>;<c>t
+ *   - Mode reports:         ?<m>;<v>$y  <m>;<v>$y
  */
-const OSC_COLOR_RE = /(?:\x1b\])?\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?/gi;
+const QUERY_RESPONSE_RE = new RegExp(
+  [
+    // OSC color: [ESC]] <id>[;<id>] ; rgb:RR/GG/BB [ST]
+    String.raw`(?:\x1b\])?\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?`,
+    // CSI DA / DSR / CPR / window / mode reports (full form: ESC[ ... )
+    String.raw`(?:\x1b\[)[?>]?[\d;]*[cnRty]`,
+    // Bare DA/secondary DA:  ?1;2c  ?6c  >0;276;0c  1;2c
+    String.raw`[?>][\d;]*c`,
+    // Bare DA without prefix (ESC, [, and ? all stripped): 1;2c
+    String.raw`\d+(?:;\d+)+c`,
+    // Bare mode report: 4;2$y
+    String.raw`(?<!\x1b)[\d;]+\$y`,
+  ].join('|'),
+  'gi',
+);
 
-function stripOscColorResponses(data: string): string {
-  return data.replace(OSC_COLOR_RE, '');
+function stripTerminalQueryResponses(data: string): string {
+  return data.replace(QUERY_RESPONSE_RE, '');
 }
 
 function resolveExecutable(command: string, envPath = process.env.PATH ?? ''): string | null {
@@ -273,7 +297,7 @@ export class TerminalSession {
 
   private writeInput(message: TerminalInputMessage): void {
     if (!this.pty) return;
-    const data = stripOscColorResponses(message.data);
+    const data = stripTerminalQueryResponses(message.data);
     if (!data) return;
     this.batcher?.noteInput();
     this.pty.write(data);
@@ -281,7 +305,7 @@ export class TerminalSession {
 
   writeRawInput(data: string): void {
     if (!this.pty) return;
-    const cleaned = stripOscColorResponses(data);
+    const cleaned = stripTerminalQueryResponses(data);
     if (!cleaned) return;
     this.batcher?.noteInput();
     this.pty.write(cleaned);
