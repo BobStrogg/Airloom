@@ -310,7 +310,9 @@ disconnectBtn.addEventListener('click', () => {
     // 8-second peer timeout: if the host is on a new session it will never appear,
     // so fail cleanly rather than hanging on "waiting for host".
     await doConnect(saved.relay, saved.session, encryptionKey, saved.transport, saved.token, 8000);
-  } catch { /* ignore */ }
+  } catch (err) {
+    debug(`[viewer] Auto-reconnect failed: ${err instanceof Error ? err.message : err}`);
+  }
   if (!channel) {
     // Saved session is stale — clear it and show clean connect screen
     clearLastSession();
@@ -345,6 +347,16 @@ async function connectWithCode() {
     } catch { /* try next origin */ }
   }
 
+  // /api/pair failed — fall back to the saved Ably token from a previous QR session.
+  // This covers the home-screen / cross-origin case where the host isn't reachable
+  // via HTTP but Ably relay still works.
+  if (saved?.token && saved.transport === 'ably') {
+    saveLastSession({ ...saved, session: sessionToken });
+    await doConnect(saved.relay, sessionToken, encryptionKey, 'ably', saved.token);
+    return;
+  }
+
+  // Last resort: try self-hosted WS relay (for users who run their own relay)
   const relayUrl = relayInput.value.trim() || 'ws://localhost:4500';
   saveConnectionParams(codeInput.value, relayUrl);
   await doConnect(relayUrl, sessionToken, encryptionKey);
