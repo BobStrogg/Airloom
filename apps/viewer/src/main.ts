@@ -7,6 +7,17 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
+const debugPanel = document.getElementById('debugPanel')!;
+function debug(msg: string) {
+  const line = document.createElement('div');
+  line.textContent = `${Date.now().toString().slice(-4)}: ${msg}`;
+  debugPanel.appendChild(line);
+  debugPanel.scrollTop = debugPanel.scrollHeight;
+  console.log(msg);
+}
+
+debug('Viewer starting...');
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js')
     .then((reg) => (reg.active ? Promise.resolve() : new Promise<void>((r) => {
@@ -104,6 +115,7 @@ function ensureTerminal() {
   term.loadAddon(fitAddon);
   term.open(terminalEl);
   term.onData((data) => {
+    console.log(`[viewer] Terminal input: ${JSON.stringify(data)} (ready=${terminalReady}, channel=${!!channel})`);
     if (!terminalReady || !channel) return;
     channel.send({ type: 'terminal_input', data } satisfies TerminalMessage);
   });
@@ -271,10 +283,20 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
       }
     });
     channel.on('stream', (stream: ReadStream) => {
-      if (!isTerminalStream(stream)) return;
+      if (!isTerminalStream(stream)) {
+        console.log('[viewer] Non-terminal stream received, ignoring');
+        return;
+      }
+      console.log('[viewer] Terminal stream received');
       ensureTerminal();
-      stream.on('data', (chunk: string) => term?.write(chunk));
-      stream.on('end', () => writeTerminalLine('[session closed]'));
+      stream.on('data', (chunk: string) => {
+        console.log(`[viewer] Stream data: ${chunk.length} chars`);
+        term?.write(chunk);
+      });
+      stream.on('end', () => {
+        console.log('[viewer] Stream ended');
+        writeTerminalLine('[session closed]');
+      });
     });
     channel.on('error', (err: Error) => {
       console.error('Channel error:', err);
