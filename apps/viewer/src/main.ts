@@ -11,13 +11,6 @@ function debug(msg: string) {
   console.log(msg);
 }
 
-// Strip problematic OSC sequences that xterm.js may not handle well
-function sanitizeTerminalData(data: string): string {
-  // Filter OSC 10/11 color query responses (10;rgb:RRRR/GGGG/BBBB format)
-  // These appear when some programs query terminal colors
-  return data.replace(/\x1b\](10|11);rgb:[0-9a-f/]+\x07/g, '');
-}
-
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js')
     .then((reg) => (reg.active ? Promise.resolve() : new Promise<void>((r) => {
@@ -128,13 +121,20 @@ function ensureTerminal() {
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(terminalEl);
+
+  // Suppress OSC color query responses at the source. When the PTY shell (e.g.
+  // zsh) sends OSC 10/11/… queries, xterm.js auto-replies via onData, which
+  // gets forwarded back to the PTY as input and echoed as garbage text.
+  // Returning true from these handlers tells xterm.js "handled" so it won't
+  // generate a response.  OSC 4 = indexed color, 10 = fg, 11 = bg,
+  // 12 = cursor color, 17 = highlight, 19 = highlight fg.
+  for (const osc of [4, 10, 11, 12, 17, 19]) {
+    term.parser.registerOscHandler(osc, () => true);
+  }
+
   term.onData((data) => {
     if (!terminalReady || !channel) return;
-    // Strip OSC color query responses that xterm.js auto-generates (e.g. \x1b]10;rgb:...\x07).
-    // If forwarded to the PTY, the shell echoes them as literal text.
-    const filtered = data.replace(/\x1b\]\d+;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
-    if (!filtered) return;
-    channel.send({ type: 'terminal_input', data: filtered } satisfies TerminalMessage);
+    channel.send({ type: 'terminal_input', data } satisfies TerminalMessage);
   });
   terminalContainer.addEventListener('click', () => term?.focus());
   resizeObserver = new ResizeObserver(() => fitAndSyncTerminal());
@@ -403,11 +403,7 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
       debug('[viewer] Terminal stream received');
       ensureTerminal();
       stream.on('data', (chunk: string) => {
-        const clean = sanitizeTerminalData(chunk);
-        if (clean !== chunk) {
-          debug(`[viewer] Sanitized ${chunk.length - clean.length} chars of OSC sequences`);
-        }
-        term?.write(clean);
+        term?.write(chunk);
       });
       stream.on('end', () => {
         debug('[viewer] Stream ended');
