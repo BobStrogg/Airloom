@@ -355,7 +355,7 @@ async function main() {
   channel.on('peer_left', () => {
     console.log('[host] Phone disconnected.');
     state.connected = false;
-    terminal.close();
+    terminal.detachStream();
     broadcast({ type: 'peer_disconnected' });
   });
 
@@ -388,7 +388,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('\n[host] Shutting down...');
-    terminal.close();
+    terminal.destroy();
     state.adapter?.destroy?.();
     try { channel.close(); } catch { /* Ably may throw if already detached */ }
     server.close(() => process.exit(0));
