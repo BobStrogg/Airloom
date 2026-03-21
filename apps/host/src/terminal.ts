@@ -126,13 +126,13 @@ export class TerminalSession {
 
   private start(): void {
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
-    const file = resolveExecutable(command.file) ?? command.file;
+    let file = resolveExecutable(command.file) ?? command.file;
     console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows})`);
-    console.log(`[host] Working dir: ${process.cwd()}, Node: ${process.version}, Platform: ${process.platform}`);
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
+    let pty: import('node-pty').IPty;
     try {
-      this.pty = spawn(file, command.args, {
+      pty = spawn(file, command.args, {
         name: 'xterm-256color',
         cols: this.cols,
         rows: this.rows,
@@ -140,16 +140,33 @@ export class TerminalSession {
         env,
       });
     } catch (err) {
-      console.error('[host] PTY spawn failed:', (err as Error).message);
-      console.error('[host] File exists:', existsSync(file));
-      console.error('[host] Full error:', err);
-      if (err instanceof Error) {
-        console.error('[host] Stack:', err.stack);
+      console.error('[host] PTY spawn failed for', file, ':', (err as Error).message);
+      // Fallback to /bin/sh if the preferred shell fails (common in CI/containers)
+      if (file !== '/bin/sh' && existsSync('/bin/sh')) {
+        console.log('[host] Falling back to /bin/sh');
+        try {
+          pty = spawn('/bin/sh', [], {
+            name: 'xterm-256color',
+            cols: this.cols,
+            rows: this.rows,
+            cwd: process.cwd(),
+            env,
+          });
+          file = '/bin/sh';
+        } catch (fallbackErr) {
+          console.error('[host] Fallback PTY spawn failed:', (fallbackErr as Error).message);
+          this.channel.send({ type: 'terminal_exit', exitCode: 1, signal: undefined } satisfies TerminalExitMessage);
+          return;
+        }
+      } else {
+        console.error('[host] No PTY fallback available');
+        this.channel.send({ type: 'terminal_exit', exitCode: 1, signal: undefined } satisfies TerminalExitMessage);
+        return;
       }
-      return;
     }
 
-    this.pty.onData((data) => {
+    this.pty = pty;
+    pty.onData((data) => {
       process.stdout.write(data);
       // Append to scrollback buffer, trim oldest data if over limit
       this.outputBuffer += data;
@@ -160,7 +177,7 @@ export class TerminalSession {
       this.broadcastFn?.({ type: 'terminal_output', data });
     });
 
-    this.pty.onExit(({ exitCode, signal }) => {
+    pty.onExit(({ exitCode, signal }) => {
       this.batcher?.flush();
       this.detachStream();
       this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);
