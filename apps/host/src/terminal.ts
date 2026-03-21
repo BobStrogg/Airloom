@@ -48,33 +48,46 @@ fixSpawnHelperPermissions();
  * fragments like "?1;2c" or "10;rgb:e6e6/eded/f3f3".
  *
  * We match both full (ESC-prefixed) and bare forms.  Bare forms are only
- * matched when anchored (start-of-string or preceded by a known prefix
- * character) to avoid false positives on legitimate terminal content.
+ * matched when anchored to start-of-string (or after a newline) to avoid
+ * false positives on legitimate terminal content.
+ *
+ * NOTE: We intentionally use the `g` flag only (not `gi`).  Case-insensitive
+ * matching would cause the CSI terminator set `[cnRt]` to also match
+ * uppercase variants like `C` (Cursor Forward) and `N`, which are legitimate
+ * cursor-movement sequences that must not be stripped.
  *
  * The patterns cover:
  *   - OSC color responses:  ESC]10;rgb:…  (bare only at start of string)
- *   - DA responses:         ?1;2c  ?6c  >0;276;0c  etc.
+ *   - DA responses:         ESC[?1;2c  or bare ?1;2c  >0;276;0c  etc.
  *   - DSR:                  ESC[0n  ESC[3n  etc.
  *   - CPR:                  ESC[<row>;<col>R
  *   - Window/cell reports:  ESC[4;<h>;<w>t  ESC[8;<r>;<c>t
- *   - Mode reports:         <m>;<v>$y
+ *   - Mode reports:         ESC[<m>;<v>$y  or bare <m>;<v>$y
  */
 const QUERY_RESPONSE_RE = new RegExp(
   [
     // OSC color (full form): ESC] <id>[;<id>] ; rgb:RR/GG/BB [ST]
-    String.raw`\x1b\]\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?`,
+    String.raw`\x1b\]\d+(?:;\d+)?;rgb:[0-9a-fA-F]{2,4}(?:\/[0-9a-fA-F]{2,4}){2}(?:\x1b\\|\x07)?`,
     // OSC color (bare, ESC stripped): <id>[;<id>] ; rgb:RR/GG/BB
     // Anchored to start-of-string so we only strip it when the response is the
     // entire (or leading) content of a write, not embedded in normal text.
-    String.raw`(?<=^|\n)\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?`,
-    // CSI DA / DSR / CPR / window / mode reports (full form: ESC[ ... )
-    String.raw`\x1b\[[?>]?[\d;]*[cnRty]`,
+    String.raw`(?<=^|\n)\d+(?:;\d+)?;rgb:[0-9a-fA-F]{2,4}(?:\/[0-9a-fA-F]{2,4}){2}(?:\x1b\\|\x07)?`,
+    // CSI DA / DSR / CPR / window reports (full form: ESC[ … )
+    // Note: mode reports end in `$y` (with $ modifier), not bare `y`, so `y`
+    // is deliberately excluded from this terminator set.
+    String.raw`\x1b\[[?>]?[\d;]*[cnRt]`,
+    // CSI mode report (full form): ESC[ [?] <params> $ y
+    String.raw`\x1b\[\??[\d;]*\$y`,
     // Bare DA/secondary DA:  ?1;2c  ?6c  >0;276;0c
-    String.raw`[?>][\d;]*c`,
+    // Anchored to start-of-string/line to avoid stripping legitimate text
+    // containing "?c" or ">c" (e.g. shell redirections like `cmd >c`).
+    String.raw`(?<=^|\n)[?>][\d;]*c`,
     // Bare mode report: 4;2$y
-    String.raw`(?<!\x1b)[\d;]+\$y`,
+    // Anchored to start-of-string/line to avoid stripping legitimate text
+    // like shell expressions containing "$y".
+    String.raw`(?<=^|\n)[\d;]+\$y`,
   ].join('|'),
-  'gi',
+  'g',
 );
 
 function stripTerminalQueryResponses(data: string): string {
