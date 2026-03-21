@@ -7,7 +7,7 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 /** Persisted adapter configuration. API keys are NOT stored — use env vars. */
 export interface SavedConfig {
-  type: 'anthropic' | 'openai' | 'cli';
+  type: 'anthropic' | 'openai' | 'cli' | 'terminal';
   model?: string;
   /** CLI preset id (e.g. 'devin', 'claude-code', 'custom') */
   preset?: string;
