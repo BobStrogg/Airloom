@@ -32,7 +32,7 @@
     "esbuild": "^0.27.4"
   },
   "scripts": {
-    "postinstall": "node -e \"process.env.CI||require('child_process').execSync('npm rebuild node-pty',{stdio:'inherit'})\"",
+    "postinstall": "node -e \"process.env.CI||require('child_process').execSync('pnpm rebuild node-pty',{stdio:'inherit'})\"",
     "dev": "pnpm build:host-only && pnpm copy-viewer && node dist/index.js",
     "start": "node dist/index.js",
     "build": "pnpm --dir ../viewer build && node build.mjs && pnpm copy-viewer",
