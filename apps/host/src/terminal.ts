@@ -39,6 +39,18 @@ function fixSpawnHelperPermissions(): void {
 // Fix permissions once at module load, before any PTY spawn attempt
 fixSpawnHelperPermissions();
 
+/**
+ * Strip OSC color query responses that xterm.js generates automatically.
+ * The full form is ESC ] <id> ; rgb:RRRR/GGGG/BBBB ESC \ but the ESC bytes
+ * may be stripped or split during channel transport, leaving bare fragments
+ * like "10;rgb:e6e6/eded/f3f3".  We match both forms.
+ */
+const OSC_COLOR_RE = /(?:\x1b\])?\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?/gi;
+
+function stripOscColorResponses(data: string): string {
+  return data.replace(OSC_COLOR_RE, '');
+}
+
 function resolveExecutable(command: string, envPath = process.env.PATH ?? ''): string | null {
   if (!command) return null;
   if (isAbsolute(command) && existsSync(command)) return command;
@@ -261,14 +273,18 @@ export class TerminalSession {
 
   private writeInput(message: TerminalInputMessage): void {
     if (!this.pty) return;
+    const data = stripOscColorResponses(message.data);
+    if (!data) return;
     this.batcher?.noteInput();
-    this.pty.write(message.data);
+    this.pty.write(data);
   }
 
   writeRawInput(data: string): void {
     if (!this.pty) return;
+    const cleaned = stripOscColorResponses(data);
+    if (!cleaned) return;
     this.batcher?.noteInput();
-    this.pty.write(data);
+    this.pty.write(cleaned);
   }
 
   private resize(message: TerminalResizeMessage): void {
