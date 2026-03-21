@@ -362,6 +362,7 @@ async function main() {
   // Messages from the phone (viewer)
   channel.on('message', (data: unknown) => {
     if (isTerminalMessage(data)) {
+      console.log('[host] Terminal message from phone:', (data as {type: string}).type);
       terminal.handleMessage(data);
       return;
     }
