@@ -10,8 +10,10 @@
     "build": "pnpm -r build",
     "build:pages": "pnpm --filter @airloom/viewer build:pages",
     "typecheck": "tsc --build",
+    "preinstall": "npx only-allow pnpm",
     "postinstall": "node scripts/fix-permissions.mjs"
   },
+  "packageManager": "pnpm@10.32.1",
   "engines": {
     "node": ">=18"
   },
