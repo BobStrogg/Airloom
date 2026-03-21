@@ -106,23 +106,66 @@ export function getTerminalLaunchDisplay(explicitCommand?: string): string {
   return [command.file, ...command.args].join(' ');
 }
 
+const MAX_BUFFER_BYTES = 512 * 1024; // 512 KB scrollback
+
 export class TerminalSession {
   private pty: IPty | null = null;
   private stream: WriteStream | null = null;
   private batcher: AdaptiveOutputBatcher | null = null;
   private cols = 120;
   private rows = 36;
+  private outputBuffer = '';
 
   constructor(
     private readonly channel: Channel,
     private readonly getLaunchCommand?: () => string | undefined,
     private readonly broadcastFn?: (data: unknown) => void,
-  ) {}
+  ) {
+    this.start();
+  }
+
+  private start(): void {
+    const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
+    const file = resolveExecutable(command.file) ?? command.file;
+    console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows})`);
+
+    const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
+    try {
+      this.pty = spawn(file, command.args, {
+        name: 'xterm-256color',
+        cols: this.cols,
+        rows: this.rows,
+        cwd: process.cwd(),
+        env,
+      });
+    } catch (err) {
+      console.error('[host] PTY spawn failed:', (err as Error).message);
+      return;
+    }
+
+    this.pty.onData((data) => {
+      process.stdout.write(data);
+      // Append to scrollback buffer, trim oldest data if over limit
+      this.outputBuffer += data;
+      if (this.outputBuffer.length > MAX_BUFFER_BYTES) {
+        this.outputBuffer = this.outputBuffer.slice(this.outputBuffer.length - MAX_BUFFER_BYTES);
+      }
+      this.batcher?.write(data);
+      this.broadcastFn?.({ type: 'terminal_output', data });
+    });
+
+    this.pty.onExit(({ exitCode, signal }) => {
+      this.batcher?.flush();
+      this.detachStream();
+      this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);
+      this.pty = null;
+    });
+  }
 
   handleMessage(message: TerminalMessage): void {
     switch (message.type) {
       case 'terminal_open':
-        this.open(message);
+        this.attach(message);
         break;
       case 'terminal_input':
         this.writeInput(message);
@@ -131,78 +174,53 @@ export class TerminalSession {
         this.resize(message);
         break;
       case 'terminal_close':
-        this.close();
+        this.detachStream();
         break;
       case 'terminal_exit':
         break;
     }
   }
 
-  close(): void {
+  private attach(message: TerminalOpenMessage): void {
+    this.cols = Math.max(20, Math.floor(message.cols || this.cols));
+    this.rows = Math.max(5, Math.floor(message.rows || this.rows));
+
+    // Resize PTY to match new viewer dimensions
+    this.pty?.resize(this.cols, this.rows);
+
+    // Close any existing stream for a previous connection
+    this.detachStream();
+
+    // Open a new stream for the connecting viewer
+    const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
+    this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
+    this.batcher = new AdaptiveOutputBatcher((data) => { this.stream?.write(data); });
+
+    // Replay scrollback so the viewer sees existing terminal content immediately
+    if (this.outputBuffer) {
+      this.stream.write(this.outputBuffer);
+    }
+
+    // If PTY exited since last connection, restart it
+    if (!this.pty) {
+      this.start();
+    }
+  }
+
+  /** End the current stream without killing the PTY (called on peer disconnect). */
+  detachStream(): void {
     this.batcher?.destroy();
     this.batcher = null;
     if (this.stream && !this.stream.ended) this.stream.end();
     this.stream = null;
-    try { this.pty?.kill(); } catch {}
-    this.pty = null;
   }
 
-  private open(message: TerminalOpenMessage): void {
-    this.cols = Math.max(20, Math.floor(message.cols || this.cols));
-    this.rows = Math.max(5, Math.floor(message.rows || this.rows));
-    if (this.pty) {
-      this.pty.resize(this.cols, this.rows);
-      // Phone reconnected to an existing PTY session — create a fresh stream so
-      // output reaches the new viewer connection, then send Ctrl+L to redraw.
-      if (!this.stream || this.stream.ended) {
-        const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
-        this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
-        this.batcher = new AdaptiveOutputBatcher((data) => { this.stream?.write(data); });
-        this.pty.write('\x0c'); // Ctrl+L — standard terminal redraw signal
-      }
-      return;
-    }
-
-    const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
-    const file = resolveExecutable(command.file) ?? command.file;
-    console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows})`);
-
-    const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
-    let pty: import('node-pty').IPty;
-    try {
-      pty = spawn(file, command.args, {
-        name: 'xterm-256color',
-        cols: this.cols,
-        rows: this.rows,
-        cwd: process.cwd(),
-        env,
-      });
-    } catch (err) {
-      console.error('[host] PTY spawn failed:', (err as Error).message, '\n', (err as Error).stack);
-      this.channel.send({ type: 'terminal_exit', exitCode: 1, signal: undefined } satisfies TerminalExitMessage);
-      return;
-    }
-
-    this.pty = pty;
-    const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
-    this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
-    this.batcher = new AdaptiveOutputBatcher((data) => {
-      this.stream?.write(data);
-    });
-
-    pty.onData((data) => {
-      process.stdout.write(data);
-      this.batcher?.write(data);
-      this.broadcastFn?.({ type: 'terminal_output', data });
-    });
-    pty.onExit(({ exitCode, signal }) => {
-      this.batcher?.flush();
-      this.stream?.end();
-      this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);
-      this.stream = null;
-      this.batcher = null;
-      this.pty = null;
-    });
+  /** Kill the PTY — called only on host shutdown. */
+  destroy(): void {
+    this.detachStream();
+    try { this.pty?.kill(); } catch {}
+    this.pty = null;
+    this.outputBuffer = '';
   }
 
   private writeInput(message: TerminalInputMessage): void {
