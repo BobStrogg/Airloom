@@ -8,7 +8,6 @@ import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import QRCode from 'qrcode';
 import { createHostServer, enqueueAIResponse } from './server.js';
 import type { ServerState } from './server.js';
 import { loadConfig, getConfigPath } from './config.js';
@@ -16,6 +15,15 @@ import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { CLIAdapter, CLI_PRESETS } from './adapters/cli.js';
 import { TerminalSession, getTerminalLaunchDisplay, isTerminalMessage } from './terminal.js';
+
+// Lazy import qrcode to avoid tsx ETIMEDOUT issues on macOS
+let QRCode: typeof import('qrcode') | null = null;
+async function getQRCode() {
+  if (!QRCode) QRCode = await import('qrcode');
+  return QRCode;
+}
+
+console.log('[host] Module loaded');
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing (lightweight, no dependencies)
@@ -305,8 +313,9 @@ async function main() {
   // Dev mode uses LAN viewer; production uses GitHub Pages
   const qrTarget = (IS_DEV && lanViewerUrl) ? lanViewerUrl : pagesUrl;
 
-  const qrDataUrl = await QRCode.toDataURL(qrTarget, { width: 300, margin: 2 });
-  const qrTerminal = await QRCode.toString(qrTarget, { type: 'terminal', small: true });
+  const qrcode = await getQRCode();
+  const qrDataUrl = await qrcode.toDataURL(qrTarget, { width: 300, margin: 2 });
+  const qrTerminal = await qrcode.toString(qrTarget, { type: 'terminal', small: true });
   state.pairingQR = qrDataUrl;
 
   console.log('\nPairing QR Code:');

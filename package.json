@@ -5,7 +5,7 @@
   "description": "Secure, E2E encrypted device-to-device streaming relay",
   "scripts": {
     "dev:relay": "tsx packages/relay/src/main.ts",
-    "dev:host": "tsx apps/host/src/index.ts",
+    "dev:host": "pnpm --filter airloom dev",
     "dev:viewer": "pnpm --filter @airloom/viewer dev",
     "build": "pnpm -r build",
     "build:pages": "pnpm --filter @airloom/viewer build:pages",
