@@ -1,6 +1,6 @@
 {
   "name": "airloom",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "Run AI on your computer, control it from your phone. E2E encrypted.",
   "type": "module",
   "bin": {
