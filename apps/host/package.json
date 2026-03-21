@@ -31,7 +31,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsup && node -e \"import('node:fs').then(f=>{const s='../viewer/dist';if(f.existsSync(s))f.cpSync(s,'dist/viewer',{recursive:true})})\"",
+    "build": "pnpm --dir ../viewer build && tsup && node -e \"import('node:fs').then(f=>{const s='../viewer/dist';if(f.existsSync(s))f.cpSync(s,'dist/viewer',{recursive:true})})\"",
     "build:host-only": "tsup"
   },
   "engines": {
