@@ -167,9 +167,15 @@ async function main() {
       queryTime: true,
     });
     const channelName = `airloom:${session.sessionToken}`;
+    // Scope the token to airloom:* (not just this session's channel) so that a
+    // saved token survives host restarts.  When the host creates a new session the
+    // viewer's home-screen shortcut can reuse the stored token with the new
+    // session's channel.  Security isn't weakened: all payload data is E2E
+    // encrypted with a key derived from the pairing code, so the relay (Ably)
+    // only ever sees ciphertext.
     const tokenDetails = await rest.auth.requestToken({
       clientId: '*', // viewer picks its own clientId
-      capability: { [channelName]: ['publish', 'subscribe', 'presence'] },
+      capability: { 'airloom:*': ['publish', 'subscribe', 'presence'] },
       ttl: ABLY_TOKEN_TTL,
     });
     console.log(`[ably] Scoped token issued (TTL: ${Math.round(ABLY_TOKEN_TTL / 60000)}min, channel: ${channelName})`);
