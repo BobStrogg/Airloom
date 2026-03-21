@@ -165,27 +165,37 @@ export class TerminalSession {
 
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
     const file = resolveExecutable(command.file) ?? command.file;
+    console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows})`);
+
+    const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
+    let pty: import('node-pty').IPty;
+    try {
+      pty = spawn(file, command.args, {
+        name: 'xterm-256color',
+        cols: this.cols,
+        rows: this.rows,
+        cwd: process.cwd(),
+        env,
+      });
+    } catch (err) {
+      console.error('[host] PTY spawn failed:', (err as Error).message, '\n', (err as Error).stack);
+      this.channel.send({ type: 'terminal_exit', exitCode: 1, signal: undefined } satisfies TerminalExitMessage);
+      return;
+    }
+
+    this.pty = pty;
     const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
     this.batcher = new AdaptiveOutputBatcher((data) => {
       this.stream?.write(data);
     });
 
-    const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
-    this.pty = spawn(file, command.args, {
-      name: 'xterm-256color',
-      cols: this.cols,
-      rows: this.rows,
-      cwd: process.cwd(),
-      env,
-    });
-
-    this.pty.onData((data) => {
+    pty.onData((data) => {
       process.stdout.write(data);
       this.batcher?.write(data);
       this.broadcastFn?.({ type: 'terminal_output', data });
     });
-    this.pty.onExit(({ exitCode, signal }) => {
+    pty.onExit(({ exitCode, signal }) => {
       this.batcher?.flush();
       this.stream?.end();
       this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);
