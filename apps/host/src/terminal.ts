@@ -126,47 +126,33 @@ export class TerminalSession {
 
   private start(): void {
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
-    let file = resolveExecutable(command.file) ?? command.file;
-    console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows})`);
+    const file = resolveExecutable(command.file) ?? command.file;
+    const cwd = process.cwd();
+    console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows}) node=${process.version}`);
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
-    let pty: import('node-pty').IPty;
+    const spawnOpts = { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd, env };
     try {
-      pty = spawn(file, command.args, {
-        name: 'xterm-256color',
-        cols: this.cols,
-        rows: this.rows,
-        cwd: process.cwd(),
-        env,
-      });
+      this.pty = spawn(file, command.args, spawnOpts);
     } catch (err) {
-      console.error('[host] PTY spawn failed for', file, ':', (err as Error).message);
-      // Fallback to /bin/sh if the preferred shell fails (common in CI/containers)
-      if (file !== '/bin/sh' && existsSync('/bin/sh')) {
-        console.log('[host] Falling back to /bin/sh');
+      const e = err as NodeJS.ErrnoException;
+      console.error(`[host] PTY spawn failed: ${e.message} (code=${e.code ?? 'none'}) file=${file} cwd=${cwd}`);
+      // Fallback: try /bin/sh with no flags if the preferred shell failed
+      if (file !== '/bin/sh') {
+        console.error('[host] Retrying with /bin/sh...');
         try {
-          pty = spawn('/bin/sh', [], {
-            name: 'xterm-256color',
-            cols: this.cols,
-            rows: this.rows,
-            cwd: process.cwd(),
-            env,
-          });
-          file = '/bin/sh';
-        } catch (fallbackErr) {
-          console.error('[host] Fallback PTY spawn failed:', (fallbackErr as Error).message);
-          this.channel.send({ type: 'terminal_exit', exitCode: 1, signal: undefined } satisfies TerminalExitMessage);
+          this.pty = spawn('/bin/sh', [], spawnOpts);
+          console.log('[host] PTY fallback to /bin/sh succeeded');
+        } catch (err2) {
+          console.error('[host] PTY fallback also failed:', (err2 as Error).message);
           return;
         }
       } else {
-        console.error('[host] No PTY fallback available');
-        this.channel.send({ type: 'terminal_exit', exitCode: 1, signal: undefined } satisfies TerminalExitMessage);
         return;
       }
     }
 
-    this.pty = pty;
-    pty.onData((data) => {
+    this.pty.onData((data) => {
       process.stdout.write(data);
       // Append to scrollback buffer, trim oldest data if over limit
       this.outputBuffer += data;
@@ -177,7 +163,7 @@ export class TerminalSession {
       this.broadcastFn?.({ type: 'terminal_output', data });
     });
 
-    pty.onExit(({ exitCode, signal }) => {
+    this.pty.onExit(({ exitCode, signal }) => {
       this.batcher?.flush();
       this.detachStream();
       this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);

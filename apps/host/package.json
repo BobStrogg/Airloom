@@ -32,6 +32,7 @@
     "esbuild": "^0.27.4"
   },
   "scripts": {
+    "postinstall": "npm rebuild node-pty --update-binary",
     "dev": "pnpm build:host-only && pnpm copy-viewer && node dist/index.js",
     "start": "node dist/index.js",
     "build": "pnpm --dir ../viewer build && node build.mjs && pnpm copy-viewer",
