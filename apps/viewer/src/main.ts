@@ -197,6 +197,7 @@ restoreConnectionParams();
 // when the phone keyboard appears. Also collapses the header in landscape mode
 // to maximise the terminal area.
 const appEl = document.getElementById('app')!;
+let _vpRAF = 0;
 function applyVisualViewport() {
   if (!window.visualViewport) return;
   const vv = window.visualViewport;
@@ -204,11 +205,15 @@ function applyVisualViewport() {
   appEl.style.top = `${vv.offsetTop}px`;
   // Compact header when in landscape orientation
   terminalScreen.classList.toggle('landscape', vv.width > vv.height);
-  fitAndSyncTerminal();
+  // Defer terminal fit until the layout reflows with the new dimensions
+  cancelAnimationFrame(_vpRAF);
+  _vpRAF = requestAnimationFrame(() => fitAndSyncTerminal());
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', applyVisualViewport);
   window.visualViewport.addEventListener('scroll', applyVisualViewport);
+  // Apply on initial load so the terminal is sized correctly from the start
+  applyVisualViewport();
 }
 // Re-apply after orientation settles (layout dimensions aren't immediately final)
 window.addEventListener('orientationchange', () => setTimeout(applyVisualViewport, 300));
