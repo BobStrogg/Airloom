@@ -179,11 +179,7 @@ export function createHostServer(opts: {
       try {
         const message = JSON.parse(data.toString());
         if (message.type === 'terminal_input' && typeof message.data === 'string') {
-          // Strip OSC color query responses that xterm.js auto-generates in the host browser
-          // (e.g. \x1b]10;rgb:...\x07). If we forward these to the PTY the shell echoes them as literal text.
-          const filtered = message.data.replace(/\x1b\]\d+;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
-          if (!filtered) return;
-          opts.state.terminal?.writeRawInput(filtered);
+          opts.state.terminal?.writeRawInput(message.data);
         } else if (message.type === 'terminal_resize') {
           opts.state.terminal?.handleMessage(message);
         }
@@ -391,6 +387,10 @@ function initTerminal() {
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(document.getElementById('terminal'));
+  // Suppress OSC color query responses — see viewer/main.ts for details.
+  for (const osc of [4, 10, 11, 12, 17, 19]) {
+    term.parser.registerOscHandler(osc, () => true);
+  }
   term.onData((data) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminal_input', data }));
   });
