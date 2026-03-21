@@ -43,6 +43,7 @@ let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let terminalReady = false;
+let connecting = false;
 
 interface SavedSession { session: string; token?: string; transport: 'ws' | 'ably'; relay: string; hostOrigin?: string; }
 
@@ -162,7 +163,7 @@ function ensureTerminal() {
 
 // Live-switch the xterm theme when the system color scheme changes
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-  term?.options && (term.options.theme = getTermTheme());
+  if (term) term.options.theme = getTermTheme();
 });
 
 let lastSentCols = 0;
@@ -200,6 +201,7 @@ function writeTerminalLine(text: string) {
 
 function resetConnectionUI() {
   terminalReady = false;
+  connecting = false;
   lastSentCols = 0;
   lastSentRows = 0;
   channel?.close();
@@ -270,15 +272,15 @@ scanBtn.addEventListener('click', async () => {
 focusTerminalBtn.addEventListener('click', () => term?.focus());
 ctrlCBtn.addEventListener('click', () => {
   term?.focus();
-  channel?.send({ type: 'terminal_input', data: '\x03' } satisfies TerminalMessage);
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x03' } satisfies TerminalMessage);
 });
 escBtn.addEventListener('click', () => {
   term?.focus();
-  channel?.send({ type: 'terminal_input', data: '\x1b' } satisfies TerminalMessage);
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x1b' } satisfies TerminalMessage);
 });
 tabBtn.addEventListener('click', () => {
   term?.focus();
-  channel?.send({ type: 'terminal_input', data: '\t' } satisfies TerminalMessage);
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\t' } satisfies TerminalMessage);
 });
 
 disconnectBtn.addEventListener('click', () => {
@@ -322,6 +324,7 @@ disconnectBtn.addEventListener('click', () => {
 })();
 
 async function connectWithCode() {
+  if (connecting) return;
   const raw = parsePairingCode(codeInput.value);
   if (raw.length !== 8) { showError('Code must be 8 characters'); return; }
   const sessionToken = deriveSessionToken(raw);
@@ -384,6 +387,7 @@ function isTerminalStream(stream: ReadStream): boolean {
 }
 
 async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: Uint8Array, transport: 'ws' | 'ably' = 'ws', token?: string, peerTimeoutMs = 0) {
+  connecting = true;
   showStatus('Connecting...');
   hideError();
   try {
@@ -400,16 +404,19 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     if (peerTimeoutMs > 0) {
       peerTimer = setTimeout(() => {
         if (!terminalReady) {
+          connecting = false;
           const c = channel;
           channel = null;
           c?.close();
           hideError();
+          hideStatus();
         }
       }, peerTimeoutMs);
     }
 
     channel.on('ready', () => {
       if (peerTimer) { clearTimeout(peerTimer); peerTimer = null; }
+      connecting = false;
       debug('[viewer] Channel ready');
       terminalReady = true;
       connectScreen.style.display = 'none';
@@ -460,6 +467,7 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     await channel.connect(sessionToken);
     showStatus('Connected to relay, waiting for host...');
   } catch (err: unknown) {
+    connecting = false;
     const failed = channel;
     channel = null;
     try { failed?.close(); } catch { /* ignore */ }
