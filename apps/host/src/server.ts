@@ -363,7 +363,7 @@ const HOST_HTML = `<!DOCTYPE html>
         <button class="tool-btn" onclick="sendEsc()">Esc</button>
         <button class="tool-btn" onclick="sendTab()">Tab</button>
       </div>
-      <div class="terminal-container terminal-only">
+      <div class="terminal-container terminal-only" id="terminalContainer">
         <div id="terminal"></div>
       </div>
     </div>
