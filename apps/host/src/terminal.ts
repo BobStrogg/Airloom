@@ -87,7 +87,6 @@ class AdaptiveOutputBatcher {
     if (!this.buffer) return;
     const data = this.buffer;
     this.buffer = '';
-    console.log(`[terminal] Flushing ${data.length} chars to stream`);
     this.onFlush(data);
   }
 
@@ -153,23 +152,26 @@ export class TerminalSession {
     this.rows = Math.max(5, Math.floor(message.rows || this.rows));
     if (this.pty) {
       this.pty.resize(this.cols, this.rows);
+      // Phone reconnected to an existing PTY session — create a fresh stream so
+      // output reaches the new viewer connection, then send Ctrl+L to redraw.
+      if (!this.stream || this.stream.ended) {
+        const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
+        this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
+        this.batcher = new AdaptiveOutputBatcher((data) => { this.stream?.write(data); });
+        this.pty.write('\x0c'); // Ctrl+L — standard terminal redraw signal
+      }
       return;
     }
 
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
     const file = resolveExecutable(command.file) ?? command.file;
     const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
-    console.log(`[terminal] Creating stream with meta: ${JSON.stringify(meta)}`);
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
-    console.log(`[terminal] Stream created: ${this.stream ? 'yes' : 'no'}`);
     this.batcher = new AdaptiveOutputBatcher((data) => {
-      console.log(`[terminal] Writing ${data.length} chars to stream (ended=${this.stream?.ended})`);
       this.stream?.write(data);
     });
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
-    console.log(`[terminal] Spawning: ${file} ${command.args.join(' ')} in ${process.cwd()}`);
-    console.log(`[terminal] Shell env: TERM=${env.TERM}, SHELL=${process.env.SHELL}`);
     this.pty = spawn(file, command.args, {
       name: 'xterm-256color',
       cols: this.cols,
@@ -179,12 +181,11 @@ export class TerminalSession {
     });
 
     this.pty.onData((data) => {
-      console.log(`[terminal] PTY onData: ${data.length} chars`);
+      process.stdout.write(data);
       this.batcher?.write(data);
       this.broadcastFn?.({ type: 'terminal_output', data });
     });
     this.pty.onExit(({ exitCode, signal }) => {
-      console.log(`[terminal] PTY exited: code=${exitCode}, signal=${signal}`);
       this.batcher?.flush();
       this.stream?.end();
       this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);
@@ -195,22 +196,14 @@ export class TerminalSession {
   }
 
   private writeInput(message: TerminalInputMessage): void {
-    if (!this.pty) {
-      console.log(`[terminal] Input ignored - no PTY: ${JSON.stringify(message.data)}`);
-      return;
-    }
+    if (!this.pty) return;
     this.batcher?.noteInput();
-    console.log(`[terminal] Input: ${JSON.stringify(message.data)}`);
     this.pty.write(message.data);
   }
 
   writeRawInput(data: string): void {
-    if (!this.pty) {
-      console.log(`[terminal] Raw input ignored - no PTY: ${JSON.stringify(data)}`);
-      return;
-    }
+    if (!this.pty) return;
     this.batcher?.noteInput();
-    console.log(`[terminal] Raw input: ${JSON.stringify(data)}`);
     this.pty.write(data);
   }
 

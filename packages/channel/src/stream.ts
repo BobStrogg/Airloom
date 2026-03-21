@@ -12,7 +12,6 @@ export class WriteStream {
 
   write(data: string): void {
     if (this._ended) throw new Error('Cannot write after stream has ended');
-    console.log(`[WriteStream] Sending chunk: ${data.length} chars, id=${this.id}`);
     this.sendFn({ type: 'stream_chunk', id: this.id, data });
   }
 
