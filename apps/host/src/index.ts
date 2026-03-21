@@ -15,6 +15,7 @@ import { loadConfig, getConfigPath } from './config.js';
 import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { CLIAdapter, CLI_PRESETS } from './adapters/cli.js';
+import { TerminalSession, isTerminalMessage } from './terminal.js';
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing (lightweight, no dependencies)
@@ -308,6 +309,8 @@ async function main() {
     exec(`${cmd} ${localUrl}`);
   }).catch(() => {});
 
+  const terminal = new TerminalSession(channel);
+
   // Channel events
   channel.on('ready', () => {
     console.log('[host] Phone connected! Channel ready.');
@@ -318,11 +321,16 @@ async function main() {
   channel.on('peer_left', () => {
     console.log('[host] Phone disconnected.');
     state.connected = false;
+    terminal.close();
     broadcast({ type: 'peer_disconnected' });
   });
 
   // Messages from the phone (viewer)
   channel.on('message', (data: unknown) => {
+    if (isTerminalMessage(data)) {
+      terminal.handleMessage(data);
+      return;
+    }
     if (typeof data === 'object' && data !== null && 'type' in data && 'content' in data) {
       const msg = data as Record<string, unknown>;
       if (msg.type === 'chat' && typeof msg.content === 'string') {
@@ -345,6 +353,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('\n[host] Shutting down...');
+    terminal.close();
     state.adapter?.destroy?.();
     try { channel.close(); } catch { /* Ably may throw if already detached */ }
     server.close(() => process.exit(0));

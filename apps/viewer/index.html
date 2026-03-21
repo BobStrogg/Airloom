@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <!-- Shared SVG gradient definition (referenced by inline logo marks) -->
   <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0" aria-hidden="true">
     <defs>
       <linearGradient id="logo-g" x1="0.3" y1="0" x2="0.7" y2="1">
@@ -30,7 +29,7 @@
           </g>
         </svg>
         <h1>Airloom</h1>
-        <p class="subtitle">Connect to your AI session</p>
+        <p class="subtitle">Connect to your terminal session</p>
         <div class="connect-methods">
           <button id="scanBtn" class="primary-btn">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -53,8 +52,8 @@
         <p id="connectStatus" class="status-text" style="display:none"></p>
       </div>
     </div>
-    <div id="chatScreen" class="screen" style="display:none">
-      <header class="chat-header">
+    <div id="terminalScreen" class="screen" style="display:none">
+      <header class="terminal-header">
         <div class="header-info">
           <svg class="logo-mark-sm" viewBox="0 0 100 100" fill="none" aria-hidden="true">
             <g stroke="url(#logo-g)" stroke-width="6" stroke-linecap="round">
@@ -64,7 +63,7 @@
             </g>
           </svg>
           <h2>Airloom</h2>
-          <span id="chatStatus" class="status-badge">Connected</span>
+          <span id="terminalStatus" class="status-badge">Connected</span>
         </div>
         <button id="disconnectBtn" class="icon-btn" title="Disconnect">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -72,14 +71,14 @@
           </svg>
         </button>
       </header>
-      <div id="messages" class="messages"></div>
-      <div class="input-bar">
-        <textarea id="messageInput" placeholder="Type a message..." rows="1"></textarea>
-        <button id="sendBtn" class="send-btn">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-          </svg>
-        </button>
+      <div class="terminal-toolbar">
+        <button id="focusTerminalBtn" class="tool-btn">Keyboard</button>
+        <button id="ctrlCBtn" class="tool-btn">Ctrl+C</button>
+        <button id="escBtn" class="tool-btn">Esc</button>
+        <button id="tabBtn" class="tool-btn">Tab</button>
+      </div>
+      <div id="terminalContainer" class="terminal-container">
+        <div id="terminal"></div>
       </div>
     </div>
   </div>

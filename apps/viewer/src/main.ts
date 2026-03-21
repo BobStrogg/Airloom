@@ -1,21 +1,12 @@
 import { Channel, WebSocketAdapter, AblyAdapter, type ReadStream } from '@airloom/channel';
 import type { RelayAdapter } from '@airloom/channel';
 import { deriveSessionToken, deriveEncryptionKey, parsePairingCode } from '@airloom/crypto';
-import { decodePairingData } from '@airloom/protocol';
+import { decodePairingData, type TerminalExitMessage, type TerminalMessage, type TerminalStreamMeta } from '@airloom/protocol';
 import { sha256 } from '@noble/hashes/sha256';
-import { marked } from 'marked';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 
-// Configure marked for chat-style rendering
-marked.setOptions({ gfm: true, breaks: true });
-
-/** Render markdown to HTML. User messages are escaped plain text. */
-function renderMarkdown(text: string): string {
-  return marked.parse(text, { async: false }) as string;
-}
-
-// Register service worker so the viewer works even after leaving the host's LAN.
-// After the SW is active, eagerly cache all same-origin assets (JS/CSS bundles)
-// and the page itself so a refresh while offline serves the full app.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js')
     .then((reg) => (reg.active ? Promise.resolve() : new Promise<void>((r) => {
@@ -24,11 +15,9 @@ if ('serviceWorker' in navigator) {
       else r();
     })).then(async () => {
       const cache = await caches.open('airloom-v2');
-      // Cache the page URL itself (Performance API only captures sub-resources)
       const pageUrl = location.href.split('#')[0];
       const pageHit = await cache.match(pageUrl);
       if (!pageHit) await cache.add(pageUrl).catch(() => {});
-      // Cache every same-origin sub-resource this page loaded (Vite hashed JS/CSS)
       const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
       const urls = entries
         .map((e) => e.name)
@@ -39,30 +28,34 @@ if ('serviceWorker' in navigator) {
 }
 
 const connectScreen = document.getElementById('connectScreen')!;
-const chatScreen = document.getElementById('chatScreen')!;
+const terminalScreen = document.getElementById('terminalScreen')!;
 const scanBtn = document.getElementById('scanBtn')!;
 const joinBtn = document.getElementById('joinBtn')!;
 const codeInput = document.getElementById('codeInput') as HTMLInputElement;
 const relayInput = document.getElementById('relayInput') as HTMLInputElement;
 const connectError = document.getElementById('connectError')!;
 const connectStatus = document.getElementById('connectStatus')!;
-const messagesEl = document.getElementById('messages')!;
-const messageInput = document.getElementById('messageInput') as HTMLTextAreaElement;
-const sendBtn = document.getElementById('sendBtn')!;
 const disconnectBtn = document.getElementById('disconnectBtn')!;
-const chatStatus = document.getElementById('chatStatus')!;
+const terminalStatus = document.getElementById('terminalStatus')!;
 const qrReaderEl = document.getElementById('qrReader')!;
+const terminalContainer = document.getElementById('terminalContainer')!;
+const terminalEl = document.getElementById('terminal')!;
+const focusTerminalBtn = document.getElementById('focusTerminalBtn')!;
+const ctrlCBtn = document.getElementById('ctrlCBtn')!;
+const escBtn = document.getElementById('escBtn')!;
+const tabBtn = document.getElementById('tabBtn')!;
 
 let channel: Channel | null = null;
-let currentStreamEl: HTMLDivElement | null = null;
-let currentStreamText = '';
+let term: Terminal | null = null;
+let fitAddon: FitAddon | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let terminalReady = false;
 
-// Persist last connection params so the user can easily reconnect (especially in PWA)
 function saveConnectionParams(code: string | null, relayUrl: string) {
   try {
     if (code) localStorage.setItem('airloom:lastCode', code);
     localStorage.setItem('airloom:lastRelay', relayUrl);
-  } catch { /* localStorage may be unavailable in some contexts */ }
+  } catch {}
 }
 
 function restoreConnectionParams() {
@@ -71,12 +64,91 @@ function restoreConnectionParams() {
     const relay = localStorage.getItem('airloom:lastRelay');
     if (code && !codeInput.value) codeInput.value = code;
     if (relay && !relayInput.value) relayInput.value = relay;
-  } catch { /* ignore */ }
+  } catch {}
+}
+
+function ensureTerminal() {
+  if (term) return;
+  term = new Terminal({
+    cursorBlink: true,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontSize: 14,
+    lineHeight: 1.25,
+    allowTransparency: true,
+    scrollback: 5000,
+    theme: {
+      background: '#05070c',
+      foreground: '#e6edf3',
+      cursor: '#7c8aff',
+      cursorAccent: '#05070c',
+      selectionBackground: 'rgba(124,138,255,0.28)',
+      black: '#0a0d14',
+      red: '#ff7b72',
+      green: '#3fb950',
+      yellow: '#d29922',
+      blue: '#7c8aff',
+      magenta: '#bc8cff',
+      cyan: '#39c5cf',
+      white: '#c9d1d9',
+      brightBlack: '#6e7681',
+      brightRed: '#ffa198',
+      brightGreen: '#56d364',
+      brightYellow: '#e3b341',
+      brightBlue: '#a5b4ff',
+      brightMagenta: '#d2a8ff',
+      brightCyan: '#56d4dd',
+      brightWhite: '#f0f6fc',
+    },
+  });
+  fitAddon = new FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(terminalEl);
+  term.onData((data) => {
+    if (!terminalReady || !channel) return;
+    channel.send({ type: 'terminal_input', data } satisfies TerminalMessage);
+  });
+  terminalContainer.addEventListener('click', () => term?.focus());
+  resizeObserver = new ResizeObserver(() => fitAndSyncTerminal());
+  resizeObserver.observe(terminalContainer);
+}
+
+function fitAndSyncTerminal(openIfNeeded = false) {
+  if (!term || !fitAddon) return;
+  fitAddon.fit();
+  if (!channel || !terminalReady) return;
+  const message: TerminalMessage = openIfNeeded
+    ? { type: 'terminal_open', cols: term.cols, rows: term.rows }
+    : { type: 'terminal_resize', cols: term.cols, rows: term.rows };
+  channel.send(message);
+}
+
+function setTerminalStatus(text: string, className = 'status-badge') {
+  terminalStatus.textContent = text;
+  terminalStatus.className = className;
+}
+
+function writeTerminalLine(text: string) {
+  if (!term) return;
+  term.writeln(text.replace(/\n/g, '\r\n'));
+}
+
+function resetConnectionUI() {
+  terminalReady = false;
+  channel?.close();
+  channel = null;
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  term?.dispose();
+  term = null;
+  fitAddon = null;
+  terminalEl.innerHTML = '';
+  terminalScreen.style.display = 'none';
+  connectScreen.style.display = 'flex';
+  restoreConnectionParams();
 }
 
 restoreConnectionParams();
 
-// Auto-format code input with dash
 codeInput.addEventListener('input', () => {
   let v = codeInput.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   if (v.length > 4) v = v.slice(0, 4) + '-' + v.slice(4, 8);
@@ -102,35 +174,32 @@ scanBtn.addEventListener('click', async () => {
   }
 });
 
-sendBtn.addEventListener('click', sendMessage);
-messageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+focusTerminalBtn.addEventListener('click', () => term?.focus());
+ctrlCBtn.addEventListener('click', () => {
+  term?.focus();
+  channel?.send({ type: 'terminal_input', data: '\x03' } satisfies TerminalMessage);
 });
-messageInput.addEventListener('input', () => {
-  messageInput.style.height = 'auto';
-  messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+escBtn.addEventListener('click', () => {
+  term?.focus();
+  channel?.send({ type: 'terminal_input', data: '\x1b' } satisfies TerminalMessage);
+});
+tabBtn.addEventListener('click', () => {
+  term?.focus();
+  channel?.send({ type: 'terminal_input', data: '\t' } satisfies TerminalMessage);
 });
 
 disconnectBtn.addEventListener('click', () => {
-  channel?.close();
-  channel = null;
-  chatScreen.style.display = 'none';
-  connectScreen.style.display = 'flex';
-  messagesEl.innerHTML = '';
-  restoreConnectionParams();
+  channel?.send({ type: 'terminal_close' } satisfies TerminalMessage);
+  resetConnectionUI();
 });
 
-// Auto-connect if URL hash contains base64url-encoded pairing data
 (async () => {
-  const hash = location.hash.slice(1); // strip leading '#'
+  const hash = location.hash.slice(1);
   if (!hash) return;
   try {
-    // Decode base64url → JSON string → pairing data
     const json = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
     await connectWithQR(json);
-  } catch {
-    // not valid pairing data — ignore, user can connect manually
-  }
+  } catch {}
 })();
 
 async function connectWithCode() {
@@ -158,60 +227,60 @@ async function connectWithQR(qrText: string) {
   }
 }
 
+function isTerminalStream(stream: ReadStream): boolean {
+  const meta = stream.meta as Partial<TerminalStreamMeta> | undefined;
+  return meta?.kind === 'terminal';
+}
+
 async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: Uint8Array, transport: 'ws' | 'ably' = 'ws', token?: string) {
-  showStatus('Connecting...'); hideError();
+  showStatus('Connecting...');
+  hideError();
   try {
     let adapter: RelayAdapter;
     if (transport === 'ably') {
       if (!token) { showError('Ably transport requires a token'); return; }
-      adapter = new AblyAdapter({ token }); // scoped token from QR — root key never exposed
+      adapter = new AblyAdapter({ token });
     } else {
       adapter = new WebSocketAdapter(relayUrl);
     }
     channel = new Channel({ adapter, role: 'viewer', encryptionKey });
 
     channel.on('ready', () => {
+      terminalReady = true;
       connectScreen.style.display = 'none';
-      chatScreen.style.display = 'flex';
-      chatStatus.textContent = 'Connected';
-      chatStatus.className = 'status-badge';
+      terminalScreen.style.display = 'flex';
+      setTerminalStatus('Connected');
+      ensureTerminal();
+      requestAnimationFrame(() => {
+        fitAndSyncTerminal(true);
+        term?.focus();
+      });
     });
     channel.on('peer_left', () => {
-      chatStatus.textContent = 'Disconnected';
-      chatStatus.className = 'status-badge disconnected';
+      setTerminalStatus('Disconnected', 'status-badge disconnected');
+      writeTerminalLine('');
+      writeTerminalLine('[host disconnected]');
     });
     channel.on('message', (data: unknown) => {
-      if (typeof data === 'string') {
-        addMessage('assistant', data);
-      } else if (typeof data === 'object' && data !== null && 'content' in data) {
-        const msg = data as Record<string, unknown>;
-        const role = typeof msg.role === 'string' ? msg.role : 'assistant';
-        if (typeof msg.content === 'string') addMessage(role, msg.content);
+      if (!data || typeof data !== 'object' || !('type' in data)) return;
+      if ((data as TerminalExitMessage).type === 'terminal_exit') {
+        const exit = data as TerminalExitMessage;
+        const detail = typeof exit.exitCode === 'number' ? `exit ${exit.exitCode}` : 'terminated';
+        writeTerminalLine('');
+        writeTerminalLine(`[terminal ${detail}]`);
       }
     });
     channel.on('stream', (stream: ReadStream) => {
-      currentStreamEl = addMessage('assistant', '');
-      currentStreamEl.classList.add('typing');
-      currentStreamEl.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
-      currentStreamText = '';
-      stream.on('data', (chunk: string) => {
-        currentStreamText += chunk;
-        if (currentStreamEl) {
-          if (currentStreamEl.classList.contains('typing')) {
-            currentStreamEl.classList.remove('typing');
-          }
-          const trimmed = currentStreamText.trimStart();
-          currentStreamEl.innerHTML = renderMarkdown(trimmed);
-          currentStreamEl.scrollIntoView({ block: 'end', behavior: 'smooth' });
-        }
-      });
-      stream.on('end', () => { currentStreamEl = null; currentStreamText = ''; });
+      if (!isTerminalStream(stream)) return;
+      ensureTerminal();
+      stream.on('data', (chunk: string) => term?.write(chunk));
+      stream.on('end', () => writeTerminalLine('[session closed]'));
     });
-    channel.on('error', (err: Error) => console.error('Channel error:', err));
-    channel.on('disconnect', () => {
-      chatStatus.textContent = 'Reconnecting…';
-      chatStatus.className = 'status-badge reconnecting';
+    channel.on('error', (err: Error) => {
+      console.error('Channel error:', err);
+      writeTerminalLine(`[error: ${err.message}]`);
     });
+    channel.on('disconnect', () => setTerminalStatus('Reconnecting…', 'status-badge reconnecting'));
 
     await channel.connect(sessionToken);
     showStatus('Connected to relay, waiting for host...');
@@ -219,28 +288,6 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     const message = err instanceof Error ? err.message : 'Unknown error';
     showError('Connection failed: ' + message);
   }
-}
-
-function sendMessage() {
-  const content = messageInput.value.trim();
-  if (!content || !channel) return;
-  messageInput.value = '';
-  messageInput.style.height = 'auto';
-  addMessage('user', content);
-  channel.send({ type: 'chat', content });
-}
-
-function addMessage(role: string, content: string): HTMLDivElement {
-  const el = document.createElement('div');
-  el.className = `msg ${role}`;
-  if (role === 'user' || !content) {
-    el.textContent = content;
-  } else {
-    el.innerHTML = renderMarkdown(content);
-  }
-  messagesEl.appendChild(el);
-  el.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  return el;
 }
 
 function showError(msg: string) { connectError.textContent = msg; connectError.style.display = 'block'; }

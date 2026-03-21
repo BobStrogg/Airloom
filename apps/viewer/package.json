@@ -8,8 +8,9 @@
     "@airloom/crypto": "workspace:*",
     "@airloom/protocol": "workspace:*",
     "@noble/hashes": "^1.7.0",
-    "html5-qrcode": "^2.3.8",
-    "marked": "^17.0.4"
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "html5-qrcode": "^2.3.8"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
