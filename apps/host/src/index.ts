@@ -230,6 +230,9 @@ async function main() {
     terminalLaunch,
     terminalLaunchCommand: launchCommand,
     messages: [],
+    sessionToken: session.sessionToken,
+    ablyToken: useAbly ? (pairingData as { token?: string }).token : undefined,
+    transport: useAbly ? 'ably' : 'ws',
   };
 
   console.log(`[host] Terminal launch: ${terminalLaunch}`);

@@ -23,6 +23,9 @@ export interface ServerState {
   terminalLaunchCommand?: string;
   messages: Array<{ role: string; content: string; timestamp: number }>;
   terminal?: { writeRawInput(data: string): void; handleMessage(msg: unknown): void };
+  sessionToken?: string;
+  ablyToken?: string;
+  transport?: 'ably' | 'ws';
 }
 
 const MAX_MESSAGES = 200;
@@ -150,17 +153,38 @@ export function createHostServer(opts: {
     res.json({ ok: true });
   });
 
+  // Allows the phone to exchange an 8-character pairing code for the current
+  // Ably session token without needing to re-scan the QR code.
+  app.get('/api/pair', (req, res) => {
+    const { session } = req.query as Record<string, string>;
+    if (!session || session !== opts.state.sessionToken) {
+      res.status(401).json({ error: 'Invalid session' });
+      return;
+    }
+    res.json({
+      token: opts.state.ablyToken,
+      transport: opts.state.transport ?? 'ws',
+      relay: opts.state.relayUrl,
+    });
+  });
+
   wss.on('connection', (ws) => {
     uiClients.add(ws);
     ws.on('close', () => uiClients.delete(ws));
     
-    // Handle messages from the host web UI
+    // Handle messages from the host web UI.
+    // Only forward terminal_input — terminal_open/resize are exclusively driven
+    // by the phone (channel) so the PTY/stream are never created prematurely.
     ws.on('message', (data) => {
       try {
         const message = JSON.parse(data.toString());
         if (message.type === 'terminal_input' && typeof message.data === 'string') {
-          opts.state.terminal?.writeRawInput(message.data);
-        } else if (message.type === 'terminal_open' || message.type === 'terminal_resize') {
+          // Strip OSC color query responses that xterm.js auto-generates in the host browser
+          // (e.g. \x1b]10;rgb:...\x07). If we forward these to the PTY the shell echoes them as literal text.
+          const filtered = message.data.replace(/\x1b\]\d+;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+          if (!filtered) return;
+          opts.state.terminal?.writeRawInput(filtered);
+        } else if (message.type === 'terminal_resize') {
           opts.state.terminal?.handleMessage(message);
         }
       } catch (err) {
@@ -291,6 +315,13 @@ const HOST_HTML = `<!DOCTYPE html>
     <p style="color:#888;font-size:.9rem;margin-top:8px" id="launchText">Launch: current shell</p>
   </div>
 
+  <div class="card pairing" id="pairingCard" style="display:none">
+    <h2>Connect Your Phone</h2>
+    <img id="qrCode" alt="QR Code"/>
+    <div class="pairing-code" id="pairingCode"></div>
+    <p style="color:#888;font-size:.85rem">Scan QR or enter code in viewer</p>
+  </div>
+
   <!-- Terminal mode: shell, Devin, Codex etc. (default when no AI adapter) -->
   <div id="terminalSection" style="display:none">
     <div class="card">
@@ -328,12 +359,6 @@ const HOST_HTML = `<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="card pairing" id="pairingCard" style="display:none">
-    <h2>Connect Your Phone</h2>
-    <img id="qrCode" alt="QR Code"/>
-    <div class="pairing-code" id="pairingCode"></div>
-    <p style="color:#888;font-size:.85rem">Scan QR or enter code in viewer</p>
-  </div>
 </div>
 <script type="module">
 import { Terminal } from 'https://esm.sh/@xterm/xterm@6';

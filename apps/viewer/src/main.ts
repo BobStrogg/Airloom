@@ -7,16 +7,16 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
-const debugPanel = document.getElementById('debugPanel')!;
 function debug(msg: string) {
-  const line = document.createElement('div');
-  line.textContent = `${Date.now().toString().slice(-4)}: ${msg}`;
-  debugPanel.appendChild(line);
-  debugPanel.scrollTop = debugPanel.scrollHeight;
   console.log(msg);
 }
 
-debug('Viewer starting...');
+// Strip problematic OSC sequences that xterm.js may not handle well
+function sanitizeTerminalData(data: string): string {
+  // Filter OSC 10/11 color query responses (10;rgb:RRRR/GGGG/BBBB format)
+  // These appear when some programs query terminal colors
+  return data.replace(/\x1b\](10|11);rgb:[0-9a-f/]+\x07/g, '');
+}
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js')
@@ -25,7 +25,7 @@ if ('serviceWorker' in navigator) {
       if (sw) sw.addEventListener('statechange', () => { if (sw.state === 'activated') r(); });
       else r();
     })).then(async () => {
-      const cache = await caches.open('airloom-v2');
+      const cache = await caches.open('airloom-v4');
       const pageUrl = location.href.split('#')[0];
       const pageHit = await cache.match(pageUrl);
       if (!pageHit) await cache.add(pageUrl).catch(() => {});
@@ -62,18 +62,32 @@ let fitAddon: FitAddon | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let terminalReady = false;
 
-function saveConnectionParams(code: string | null, relayUrl: string) {
+interface SavedSession { session: string; token?: string; transport: 'ws' | 'ably'; relay: string; hostOrigin?: string; }
+
+function saveConnectionParams(_code: string | null, relayUrl: string) {
   try {
-    if (code) localStorage.setItem('airloom:lastCode', code);
     localStorage.setItem('airloom:lastRelay', relayUrl);
   } catch {}
 }
 
+function saveLastSession(s: SavedSession) {
+  try { localStorage.setItem('airloom:lastSession', JSON.stringify(s)); } catch {}
+}
+
+function loadLastSession(): SavedSession | null {
+  try {
+    const raw = localStorage.getItem('airloom:lastSession');
+    return raw ? (JSON.parse(raw) as SavedSession) : null;
+  } catch { return null; }
+}
+
+function clearLastSession() {
+  try { localStorage.removeItem('airloom:lastSession'); } catch {}
+}
+
 function restoreConnectionParams() {
   try {
-    const code = localStorage.getItem('airloom:lastCode');
     const relay = localStorage.getItem('airloom:lastRelay');
-    if (code && !codeInput.value) codeInput.value = code;
     if (relay && !relayInput.value) relayInput.value = relay;
   } catch {}
 }
@@ -115,9 +129,12 @@ function ensureTerminal() {
   term.loadAddon(fitAddon);
   term.open(terminalEl);
   term.onData((data) => {
-    console.log(`[viewer] Terminal input: ${JSON.stringify(data)} (ready=${terminalReady}, channel=${!!channel})`);
     if (!terminalReady || !channel) return;
-    channel.send({ type: 'terminal_input', data } satisfies TerminalMessage);
+    // Strip OSC color query responses that xterm.js auto-generates (e.g. \x1b]10;rgb:...\x07).
+    // If forwarded to the PTY, the shell echoes them as literal text.
+    const filtered = data.replace(/\x1b\]\d+;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+    if (!filtered) return;
+    channel.send({ type: 'terminal_input', data: filtered } satisfies TerminalMessage);
   });
   terminalContainer.addEventListener('click', () => term?.focus());
   resizeObserver = new ResizeObserver(() => fitAndSyncTerminal());
@@ -160,6 +177,26 @@ function resetConnectionUI() {
 }
 
 restoreConnectionParams();
+
+// Shrink the app to the visual viewport height so the terminal stays visible
+// when the phone keyboard appears. Also collapses the header in landscape mode
+// to maximise the terminal area.
+const appEl = document.getElementById('app')!;
+function applyVisualViewport() {
+  if (!window.visualViewport) return;
+  const vv = window.visualViewport;
+  appEl.style.height = `${vv.height}px`;
+  appEl.style.top = `${vv.offsetTop}px`;
+  // Compact header when in landscape orientation
+  terminalScreen.classList.toggle('landscape', vv.width > vv.height);
+  fitAndSyncTerminal();
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', applyVisualViewport);
+  window.visualViewport.addEventListener('scroll', applyVisualViewport);
+}
+// Re-apply after orientation settles (layout dimensions aren't immediately final)
+window.addEventListener('orientationchange', () => setTimeout(applyVisualViewport, 300));
 
 codeInput.addEventListener('input', () => {
   let v = codeInput.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
@@ -207,21 +244,63 @@ disconnectBtn.addEventListener('click', () => {
 
 (async () => {
   const hash = location.hash.slice(1);
-  if (!hash) return;
+  if (hash) {
+    // Clear the hash immediately so if the user adds to home screen the saved URL
+    // is the clean base URL, not a stale pairing URL with an expiring token.
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      const json = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
+      await connectWithQR(json);
+    } catch { /* ignore */ }
+    if (!channel) hideError();
+    return;
+  }
+
+  // No hash — try to auto-reconnect using the last saved session (for home screen opens).
+  const saved = loadLastSession();
+  if (!saved) return;
+  showStatus('Reconnecting...');
+  const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + saved.session));
+  const encryptionKey = deriveEncryptionKey(keyMaterial);
   try {
-    const json = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
-    await connectWithQR(json);
-  } catch {}
+    // 8-second peer timeout: if the host is on a new session it will never appear,
+    // so fail cleanly rather than hanging on "waiting for host".
+    await doConnect(saved.relay, saved.session, encryptionKey, saved.transport, saved.token, 8000);
+  } catch { /* ignore */ }
+  if (!channel) {
+    // Saved session is stale — clear it and show clean connect screen
+    clearLastSession();
+    hideError();
+    hideStatus();
+  }
 })();
 
 async function connectWithCode() {
   const raw = parsePairingCode(codeInput.value);
   if (raw.length !== 8) { showError('Code must be 8 characters'); return; }
-  const relayUrl = relayInput.value.trim() || 'ws://localhost:4500';
-  saveConnectionParams(codeInput.value, relayUrl);
   const sessionToken = deriveSessionToken(raw);
   const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + sessionToken));
   const encryptionKey = deriveEncryptionKey(keyMaterial);
+
+  // Ask the host for its current Ably token using the session derived from the code.
+  // Try the current page origin first (we're served from the host on LAN), then any
+  // saved host origin from a previous QR connection.
+  const saved = loadLastSession();
+  const originsToTry = [...new Set([location.origin, saved?.hostOrigin].filter(Boolean) as string[])];
+  for (const origin of originsToTry) {
+    try {
+      const res = await fetch(`${origin}/api/pair?session=${encodeURIComponent(sessionToken)}`);
+      if (res.ok) {
+        const data = await res.json() as { token: string; transport: 'ably' | 'ws'; relay: string };
+        saveConnectionParams(codeInput.value, data.relay);
+        await doConnect(data.relay, sessionToken, encryptionKey, data.transport, data.token);
+        return;
+      }
+    } catch { /* try next origin */ }
+  }
+
+  const relayUrl = relayInput.value.trim() || 'ws://localhost:4500';
+  saveConnectionParams(codeInput.value, relayUrl);
   await doConnect(relayUrl, sessionToken, encryptionKey);
 }
 
@@ -229,9 +308,11 @@ async function connectWithQR(qrText: string) {
   try {
     const data = decodePairingData(qrText);
     saveConnectionParams(null, data.relay);
+    const transport = data.transport ?? 'ws';
+    // Save session for home screen auto-reconnect
+    saveLastSession({ session: data.session, token: data.token, transport, relay: data.relay, hostOrigin: location.origin });
     const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + data.session));
     const encryptionKey = deriveEncryptionKey(keyMaterial);
-    const transport = data.transport ?? 'ws';
     await doConnect(data.relay, data.session, encryptionKey, transport, data.token);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -244,7 +325,7 @@ function isTerminalStream(stream: ReadStream): boolean {
   return meta?.kind === 'terminal';
 }
 
-async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: Uint8Array, transport: 'ws' | 'ably' = 'ws', token?: string) {
+async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: Uint8Array, transport: 'ws' | 'ably' = 'ws', token?: string, peerTimeoutMs = 0) {
   showStatus('Connecting...');
   hideError();
   try {
@@ -257,7 +338,21 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     }
     channel = new Channel({ adapter, role: 'viewer', encryptionKey });
 
+    let peerTimer: ReturnType<typeof setTimeout> | null = null;
+    if (peerTimeoutMs > 0) {
+      peerTimer = setTimeout(() => {
+        if (!terminalReady) {
+          const c = channel;
+          channel = null;
+          c?.close();
+          hideError();
+        }
+      }, peerTimeoutMs);
+    }
+
     channel.on('ready', () => {
+      if (peerTimer) { clearTimeout(peerTimer); peerTimer = null; }
+      debug('[viewer] Channel ready');
       terminalReady = true;
       connectScreen.style.display = 'none';
       terminalScreen.style.display = 'flex';
@@ -284,17 +379,20 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     });
     channel.on('stream', (stream: ReadStream) => {
       if (!isTerminalStream(stream)) {
-        console.log('[viewer] Non-terminal stream received, ignoring');
+        debug('[viewer] Non-terminal stream, ignoring');
         return;
       }
-      console.log('[viewer] Terminal stream received');
+      debug('[viewer] Terminal stream received');
       ensureTerminal();
       stream.on('data', (chunk: string) => {
-        console.log(`[viewer] Stream data: ${chunk.length} chars`);
-        term?.write(chunk);
+        const clean = sanitizeTerminalData(chunk);
+        if (clean !== chunk) {
+          debug(`[viewer] Sanitized ${chunk.length - clean.length} chars of OSC sequences`);
+        }
+        term?.write(clean);
       });
       stream.on('end', () => {
-        console.log('[viewer] Stream ended');
+        debug('[viewer] Stream ended');
         writeTerminalLine('[session closed]');
       });
     });
@@ -307,6 +405,9 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     await channel.connect(sessionToken);
     showStatus('Connected to relay, waiting for host...');
   } catch (err: unknown) {
+    const failed = channel;
+    channel = null;
+    try { failed?.close(); } catch { /* ignore */ }
     const message = err instanceof Error ? err.message : 'Unknown error';
     showError('Connection failed: ' + message);
   }
@@ -314,4 +415,5 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
 
 function showError(msg: string) { connectError.textContent = msg; connectError.style.display = 'block'; }
 function hideError() { connectError.style.display = 'none'; }
+function hideStatus() { connectStatus.style.display = 'none'; }
 function showStatus(msg: string) { connectStatus.textContent = msg; connectStatus.style.display = 'block'; }

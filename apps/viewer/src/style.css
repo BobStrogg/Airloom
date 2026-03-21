@@ -21,7 +21,7 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 
-#app { height: 100dvh; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+#app { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 .screen { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 .connect-content {
@@ -132,7 +132,28 @@ html, body {
 #terminal .xterm-viewport {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  overflow-y: auto !important;
+  touch-action: pan-y;
 }
 
 #qrReader { width: 100%; max-width: 360px; border-radius: 12px; overflow: hidden; }
 #qrReader video { border-radius: 12px; }
+
+/* Landscape compact mode — minimise chrome so the terminal gets max vertical space */
+#terminalScreen.landscape .terminal-header {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+#terminalScreen.landscape .logo-mark-sm { display: none; }
+#terminalScreen.landscape .header-info h2 { display: none; }
+#terminalScreen.landscape .terminal-toolbar {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+#terminalScreen.landscape .tool-btn {
+  padding: 5px 10px;
+  font-size: 0.75rem;
+}
+#terminalScreen.landscape .terminal-container {
+  padding-top: 4px;
+}
