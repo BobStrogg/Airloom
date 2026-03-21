@@ -159,11 +159,17 @@ export class TerminalSession {
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
     const file = resolveExecutable(command.file) ?? command.file;
     const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
+    console.log(`[terminal] Creating stream with meta: ${JSON.stringify(meta)}`);
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
-    this.batcher = new AdaptiveOutputBatcher((data) => this.stream?.write(data));
+    console.log(`[terminal] Stream created: ${this.stream ? 'yes' : 'no'}`);
+    this.batcher = new AdaptiveOutputBatcher((data) => {
+      console.log(`[terminal] Writing ${data.length} chars to stream (ended=${this.stream?.ended})`);
+      this.stream?.write(data);
+    });
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
-    console.log(`[terminal] Spawning: ${file} ${command.args.join(' ')}`);
+    console.log(`[terminal] Spawning: ${file} ${command.args.join(' ')} in ${process.cwd()}`);
+    console.log(`[terminal] Shell env: TERM=${env.TERM}, SHELL=${process.env.SHELL}`);
     this.pty = spawn(file, command.args, {
       name: 'xterm-256color',
       cols: this.cols,
@@ -173,6 +179,7 @@ export class TerminalSession {
     });
 
     this.pty.onData((data) => {
+      console.log(`[terminal] PTY onData: ${data.length} chars`);
       this.batcher?.write(data);
       this.broadcastFn?.({ type: 'terminal_output', data });
     });

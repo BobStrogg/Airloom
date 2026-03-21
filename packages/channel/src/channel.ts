@@ -64,6 +64,7 @@ export class Channel extends EventEmitter {
   }
 
   private handleMessage(msg: ChannelMessage): void {
+    console.log(`[channel] handleMessage: ${msg.type}, id=${(msg as {id?: string}).id ?? 'n/a'}`);
     switch (msg.type) {
       case 'message':
         this.emit('message', msg.data);
@@ -94,6 +95,7 @@ export class Channel extends EventEmitter {
     if (!this.encryptionKey) throw new Error('No encryption key established');
     const plaintext = encodeChannelMessage(msg);
     const sealed = encrypt(plaintext, this.encryptionKey);
+    console.log(`[channel] sendRaw: ${msg.type}, id=${(msg as {id?: string}).id ?? 'n/a'}, sealed=${sealed.length} chars`);
     this.adapter.send(toBase64(sealed));
   }
 
