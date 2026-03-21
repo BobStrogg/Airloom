@@ -1,5 +1,6 @@
-import { basename, delimiter, isAbsolute, join, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { chmodSync, existsSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { type IPty, spawn } from 'node-pty';
 import type { Channel, WriteStream } from '@airloom/channel';
 import type {
@@ -11,6 +12,32 @@ import type {
   TerminalResizeMessage,
   TerminalStreamMeta,
 } from '@airloom/protocol';
+
+/**
+ * node-pty ships a native `spawn-helper` binary in prebuilds/.
+ * npm/npx often strips the execute bit from files in tarballs, which causes
+ * posix_spawnp to fail at runtime. This function detects and fixes the
+ * permission before we attempt to spawn a PTY.
+ */
+function fixSpawnHelperPermissions(): void {
+  try {
+    const require_ = createRequire(import.meta.url);
+    const ptyDir = dirname(require_.resolve('node-pty/package.json'));
+    const helperPath = join(ptyDir, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper');
+    if (!existsSync(helperPath)) return;
+    const mode = statSync(helperPath).mode;
+    if (!(mode & 0o111)) {
+      chmodSync(helperPath, mode | 0o755);
+      console.log(`[host] Fixed spawn-helper permissions: ${helperPath}`);
+    }
+  } catch {
+    // Non-fatal: if we can't fix permissions, the spawn will fail and we'll
+    // see the existing error handling / fallback logic.
+  }
+}
+
+// Fix permissions once at module load, before any PTY spawn attempt
+fixSpawnHelperPermissions();
 
 function resolveExecutable(command: string, envPath = process.env.PATH ?? ''): string | null {
   if (!command) return null;
