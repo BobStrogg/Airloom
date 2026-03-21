@@ -92,6 +92,11 @@ const DEFAULT_ABLY_KEY = 'SfHSAQ.IRTOQQ:FBbi9a7ZV6jIu0Gdo_UeYhIN4rzpMrud5-LldURN
 const DEFAULT_VIEWER_URL = 'https://bobstrogg.github.io/Airloom/';
 const VIEWER_URL = process.env.VIEWER_URL ?? DEFAULT_VIEWER_URL;
 
+// Dev mode: running from source via tsx (import.meta.url contains /src/).
+// When true, the QR code points to the locally-served LAN viewer so the phone
+// uses the latest local build instead of the published GitHub Pages version.
+const IS_DEV = !process.env.VIEWER_URL && new URL(import.meta.url).pathname.includes('/src/');
+
 const RELAY_URL = process.env.RELAY_URL;
 const ABLY_API_KEY = process.env.ABLY_API_KEY ?? (RELAY_URL ? undefined : DEFAULT_ABLY_KEY);
 const ABLY_TOKEN_TTL = parseInt(process.env.ABLY_TOKEN_TTL ?? String(24 * 60 * 60 * 1000), 10); // default 24h
@@ -285,29 +290,34 @@ async function main() {
   const { server, broadcast, port } = await createHostServer({ port: HOST_PORT, state, viewerDir });
 
   // Build the QR content — a URL that opens the viewer on the phone.
-  // Uses the public viewer URL (GitHub Pages) by default so the phone doesn't
-  // need LAN access. Pairing data lives in the hash fragment, which is never
-  // sent to the hosting server — only the browser sees it.
+  // In dev mode (running from source), the QR points to the locally-served LAN
+  // viewer so the phone always uses the latest local build. In production the
+  // QR points to GitHub Pages so the phone doesn't need LAN access.
   const pairingBase64 = Buffer.from(pairingJSON).toString('base64url');
   const viewerBase = VIEWER_URL.replace(/\/+$/, '');
-  const qrContent = `${viewerBase}/#${pairingBase64}`;
+  const pagesUrl = `${viewerBase}/#${pairingBase64}`;
 
-  // Also build a LAN URL for local/dev use
   const lanIP = getLanIP();
   const lanHost = lanIP ?? 'localhost';
   const lanBaseUrl = `http://${lanHost}:${port}`;
   const lanViewerUrl = viewerDir ? `${lanBaseUrl}/viewer/#${pairingBase64}` : null;
 
-  const qrDataUrl = await QRCode.toDataURL(qrContent, { width: 300, margin: 2 });
-  const qrTerminal = await QRCode.toString(qrContent, { type: 'terminal', small: true });
+  // Dev mode uses LAN viewer; production uses GitHub Pages
+  const qrTarget = (IS_DEV && lanViewerUrl) ? lanViewerUrl : pagesUrl;
+
+  const qrDataUrl = await QRCode.toDataURL(qrTarget, { width: 300, margin: 2 });
+  const qrTerminal = await QRCode.toString(qrTarget, { type: 'terminal', small: true });
   state.pairingQR = qrDataUrl;
 
   console.log('\nPairing QR Code:');
   console.log(qrTerminal);
   console.log(`Pairing Code: ${displayCode}`);
-  console.log(`Viewer URL: ${qrContent}`);
-  if (lanViewerUrl) {
-    console.log(`LAN Viewer:  ${lanViewerUrl}`);
+  if (IS_DEV && lanViewerUrl) {
+    console.log(`Viewer URL (LAN/dev): ${lanViewerUrl}`);
+    console.log(`Pages URL:            ${pagesUrl}`);
+  } else {
+    console.log(`Viewer URL: ${pagesUrl}`);
+    if (lanViewerUrl) console.log(`LAN Viewer:  ${lanViewerUrl}`);
   }
   if (!useAbly) console.log(`Relay: ${RELAY_URL}`);
 
