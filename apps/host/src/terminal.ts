@@ -47,24 +47,30 @@ fixSpawnHelperPermissions();
  * the ESC byte may be stripped from during channel transport, leaving bare
  * fragments like "?1;2c" or "10;rgb:e6e6/eded/f3f3".
  *
- * We match both full (ESC-prefixed) and bare forms.  The patterns cover:
- *   - OSC color responses:  10;rgb:…  11;rgb:…  4;N;rgb:…
+ * We match both full (ESC-prefixed) and bare forms.  Bare forms are only
+ * matched when anchored (start-of-string or preceded by a known prefix
+ * character) to avoid false positives on legitimate terminal content.
+ *
+ * The patterns cover:
+ *   - OSC color responses:  ESC]10;rgb:…  (bare only at start of string)
  *   - DA responses:         ?1;2c  ?6c  >0;276;0c  etc.
- *   - DSR:                  0n  3n  etc.
- *   - CPR:                  <row>;<col>R   ?<row>;<col>R
- *   - Window/cell reports:  4;<h>;<w>t  6;<h>;<w>t  8;<r>;<c>t
- *   - Mode reports:         ?<m>;<v>$y  <m>;<v>$y
+ *   - DSR:                  ESC[0n  ESC[3n  etc.
+ *   - CPR:                  ESC[<row>;<col>R
+ *   - Window/cell reports:  ESC[4;<h>;<w>t  ESC[8;<r>;<c>t
+ *   - Mode reports:         <m>;<v>$y
  */
 const QUERY_RESPONSE_RE = new RegExp(
   [
-    // OSC color: [ESC]] <id>[;<id>] ; rgb:RR/GG/BB [ST]
-    String.raw`(?:\x1b\])?\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?`,
+    // OSC color (full form): ESC] <id>[;<id>] ; rgb:RR/GG/BB [ST]
+    String.raw`\x1b\]\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?`,
+    // OSC color (bare, ESC stripped): <id>[;<id>] ; rgb:RR/GG/BB
+    // Anchored to start-of-string so we only strip it when the response is the
+    // entire (or leading) content of a write, not embedded in normal text.
+    String.raw`(?<=^|\n)\d+(?:;\d+)?;rgb:[0-9a-f]{2,4}(?:\/[0-9a-f]{2,4}){2}(?:\x1b\\|\x07)?`,
     // CSI DA / DSR / CPR / window / mode reports (full form: ESC[ ... )
-    String.raw`(?:\x1b\[)[?>]?[\d;]*[cnRty]`,
-    // Bare DA/secondary DA:  ?1;2c  ?6c  >0;276;0c  1;2c
+    String.raw`\x1b\[[?>]?[\d;]*[cnRty]`,
+    // Bare DA/secondary DA:  ?1;2c  ?6c  >0;276;0c
     String.raw`[?>][\d;]*c`,
-    // Bare DA without prefix (ESC, [, and ? all stripped): 1;2c
-    String.raw`\d+(?:;\d+)+c`,
     // Bare mode report: 4;2$y
     String.raw`(?<!\x1b)[\d;]+\$y`,
   ].join('|'),
