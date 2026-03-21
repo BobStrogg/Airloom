@@ -141,14 +141,26 @@ function ensureTerminal() {
   resizeObserver.observe(terminalContainer);
 }
 
+let lastSentCols = 0;
+let lastSentRows = 0;
+
 function fitAndSyncTerminal(openIfNeeded = false) {
   if (!term || !fitAddon) { debug('[viewer] fitAndSyncTerminal: no term or fitAddon'); return; }
   fitAddon.fit();
   if (!channel || !terminalReady) { debug('[viewer] fitAndSyncTerminal: no channel or not ready'); return; }
+  const cols = term.cols;
+  const rows = term.rows;
+  // Only send if dimensions actually changed (prevents zsh prompt redraw spam on orientation)
+  if (!openIfNeeded && cols === lastSentCols && rows === lastSentRows) {
+    debug(`[viewer] Skipping resize: same dimensions (${cols}x${rows})`);
+    return;
+  }
+  lastSentCols = cols;
+  lastSentRows = rows;
   const message: TerminalMessage = openIfNeeded
-    ? { type: 'terminal_open', cols: term.cols, rows: term.rows }
-    : { type: 'terminal_resize', cols: term.cols, rows: term.rows };
-  debug(`[viewer] Sending ${message.type} (${term.cols}x${term.rows})`);
+    ? { type: 'terminal_open', cols, rows }
+    : { type: 'terminal_resize', cols, rows };
+  debug(`[viewer] Sending ${message.type} (${cols}x${rows})`);
   channel.send(message);
 }
 
@@ -164,6 +176,8 @@ function writeTerminalLine(text: string) {
 
 function resetConnectionUI() {
   terminalReady = false;
+  lastSentCols = 0;
+  lastSentRows = 0;
   channel?.close();
   channel = null;
   resizeObserver?.disconnect();
