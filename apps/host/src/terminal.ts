@@ -116,6 +116,7 @@ export class TerminalSession {
   constructor(
     private readonly channel: Channel,
     private readonly getLaunchCommand?: () => string | undefined,
+    private readonly broadcastFn?: (data: unknown) => void,
   ) {}
 
   handleMessage(message: TerminalMessage): void {
@@ -169,7 +170,10 @@ export class TerminalSession {
       env,
     });
 
-    this.pty.onData((data) => this.batcher?.write(data));
+    this.pty.onData((data) => {
+      this.batcher?.write(data);
+      this.broadcastFn?.({ type: 'terminal_output', data });
+    });
     this.pty.onExit(({ exitCode, signal }) => {
       this.batcher?.flush();
       this.stream?.end();
@@ -184,6 +188,12 @@ export class TerminalSession {
     if (!this.pty) return;
     this.batcher?.noteInput();
     this.pty.write(message.data);
+  }
+
+  writeRawInput(data: string): void {
+    if (!this.pty) return;
+    this.batcher?.noteInput();
+    this.pty.write(data);
   }
 
   private resize(message: TerminalResizeMessage): void {

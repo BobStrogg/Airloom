@@ -22,6 +22,7 @@ export interface ServerState {
   terminalLaunch: string;
   terminalLaunchCommand?: string;
   messages: Array<{ role: string; content: string; timestamp: number }>;
+  terminal?: { writeRawInput(data: string): void; handleMessage(msg: unknown): void };
 }
 
 const MAX_MESSAGES = 200;
@@ -153,17 +154,14 @@ export function createHostServer(opts: {
     uiClients.add(ws);
     ws.on('close', () => uiClients.delete(ws));
     
-    // Handle messages from the web UI
+    // Handle messages from the host web UI
     ws.on('message', (data) => {
       try {
         const message = JSON.parse(data.toString());
-        
-        // Route terminal messages to the terminal session
-        if (message.type && message.type.startsWith('terminal_')) {
-          // Forward to the channel if connected (for phone viewer)
-          if (opts.state.channel) {
-            opts.state.channel.send(message);
-          }
+        if (message.type === 'terminal_input' && typeof message.data === 'string') {
+          opts.state.terminal?.writeRawInput(message.data);
+        } else if (message.type === 'terminal_open' || message.type === 'terminal_resize') {
+          opts.state.terminal?.handleMessage(message);
         }
       } catch (err) {
         console.error('[host] Invalid WebSocket message:', err);
@@ -247,6 +245,7 @@ const HOST_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Airloom - Host</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh}
@@ -269,39 +268,14 @@ const HOST_HTML = `<!DOCTYPE html>
   button{background:#7c8aff;color:#fff;border:none;cursor:pointer;font-weight:600}
   button:hover{background:#6b79ee}
   .messages{max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-  .msg{padding:10px 14px;border-radius:10px;max-width:85%;word-break:break-word;font-size:.9rem;line-height:1.5}
-  .msg.user{background:#2a3a6a;align-self:flex-end;white-space:pre-wrap}
+  .msg{padding:10px 14px;border-radius:10px;max-width:85%;word-break:break-word;font-size:.9rem;line-height:1.5;white-space:pre-wrap}
+  .msg.user{background:#2a3a6a;align-self:flex-end}
   .msg.assistant{background:#1e1e1e;border:1px solid #2a2a2a;align-self:flex-start}
-  .msg.assistant p{margin:0 0 .5em}.msg.assistant p:last-child{margin-bottom:0}
-  .msg.assistant h1,.msg.assistant h2,.msg.assistant h3,.msg.assistant h4,.msg.assistant h5,.msg.assistant h6{font-size:.95rem;font-weight:600;margin:.6em 0 .3em;color:#e0e0e0}
-  .msg.assistant h1{font-size:1.05rem}.msg.assistant h2{font-size:1rem}
-  .msg.assistant ul,.msg.assistant ol{margin:.3em 0;padding-left:1.4em}.msg.assistant li{margin:.15em 0}
-  .msg.assistant a{color:#7c8aff;text-decoration:underline}
-  .msg.assistant code{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:.82rem;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px}
-  .msg.assistant pre{margin:.5em 0;padding:10px 12px;border-radius:8px;background:#111;overflow-x:auto}
-  .msg.assistant pre code{background:none;padding:0;font-size:.8rem;line-height:1.5;white-space:pre;display:block}
-  .msg.assistant blockquote{margin:.4em 0;padding:4px 12px;border-left:3px solid #2a2a2a;color:#888}
-  .msg.assistant table{border-collapse:collapse;margin:.4em 0;font-size:.82rem}
-  .msg.assistant th,.msg.assistant td{border:1px solid #2a2a2a;padding:4px 8px}
-  .msg.assistant th{background:rgba(255,255,255,.05)}
-  .msg.assistant hr{border:none;border-top:1px solid #2a2a2a;margin:.5em 0}
-  .msg.typing{display:flex;align-items:center;gap:5px;padding:14px 18px}
-  .msg.typing .dot{width:7px;height:7px;border-radius:50%;background:#888;animation:dot-pulse 1.4s ease-in-out infinite}
-  .msg.typing .dot:nth-child(2){animation-delay:.2s}
-  .msg.typing .dot:nth-child(3){animation-delay:.4s}
-  @keyframes dot-pulse{0%,80%,100%{opacity:.25;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
   .input-area{display:flex;gap:8px}
   .input-area textarea{flex:1;resize:none;min-height:44px;max-height:120px;padding:10px 14px;border-radius:8px;border:1px solid #333;background:#111;color:#e0e0e0;font-family:inherit;font-size:.9rem}
-  
-  /* Terminal mode styles */
-  .terminal-mode .chat-only { display: none !important; }
-  .terminal-mode .terminal-only { display: block; }
-  .chat-mode .terminal-only { display: none !important; }
-  .chat-mode .chat-only { display: block; }
-  
-  .terminal-container{background:#05070c;border:1px solid #2a2a2a;border-radius:8px;height:400px;overflow:hidden;margin-bottom:12px}
+  .terminal-container{background:#05070c;border:1px solid #2a2a2a;border-radius:8px;height:420px;overflow:hidden;margin-bottom:12px}
   #terminal{width:100%;height:100%;padding:8px}
-  .terminal-toolbar{display:flex;gap:8px;margin-bottom:12px}
+  .toolbar{display:flex;gap:8px;margin-bottom:12px}
   .tool-btn{padding:6px 12px;font-size:.85rem;background:#333;border:none;border-radius:6px;color:#e0e0e0;cursor:pointer}
   .tool-btn:hover{background:#444}
 </style>
@@ -316,59 +290,44 @@ const HOST_HTML = `<!DOCTYPE html>
     <div class="status"><div class="dot wait" id="dot"></div><span id="statusText">Initializing...</span></div>
     <p style="color:#888;font-size:.9rem;margin-top:8px" id="launchText">Launch: current shell</p>
   </div>
-  
-  <!-- Chat mode UI -->
-  <div id="chatMode" class="chat-mode">
-    <div class="card" id="configCard">
-      <h2>AI Configuration</h2>
-      <div class="config-form">
-        <select id="adapterType">
-          <option value="anthropic">Anthropic Claude</option>
-          <option value="openai">OpenAI GPT</option>
-          <option value="cli">CLI Adapter</option>
-        </select>
-        <input type="text" id="model" placeholder="Model (optional)" />
-        <input type="text" id="apiKey" placeholder="API Key (if not set in environment)" />
-        <button onclick="configureAdapter()">Configure Adapter</button>
-      </div>
-    </div>
-    
-    <div class="card chat-only" id="chatCard" style="display:none">
-      <h2>Chat Messages</h2>
-      <div class="messages" id="messages"></div>
-      <div class="input-area chat-only">
-        <textarea id="messageInput" placeholder="Type your message..." rows="1"></textarea>
-        <button onclick="sendMessage()">Send</button>
-      </div>
-    </div>
-  </div>
-  
-  <!-- Terminal mode UI -->
-  <div id="terminalMode" class="terminal-mode" style="display:none">
+
+  <!-- Terminal mode: shell, Devin, Codex etc. (default when no AI adapter) -->
+  <div id="terminalSection" style="display:none">
     <div class="card">
-      <h2>Terminal Configuration</h2>
+      <h2>Launch Configuration</h2>
       <div class="config-form">
         <select id="cliPreset"></select>
         <input type="text" id="command" placeholder="Custom launch command" style="display:none"/>
         <p style="color:#666;font-size:.8rem;margin-top:4px" id="presetDesc"></p>
-        <button onclick="configureTerminal()">Apply Launch Target</button>
+        <button id="applyLaunchBtn">Apply Launch Target</button>
       </div>
     </div>
-    
-    <div class="card terminal-only">
-      <h2>Terminal Session</h2>
-      <div class="terminal-toolbar terminal-only">
-        <button class="tool-btn" onclick="focusTerminal()">Focus</button>
-        <button class="tool-btn" onclick="sendCtrlC()">Ctrl+C</button>
-        <button class="tool-btn" onclick="sendEsc()">Esc</button>
-        <button class="tool-btn" onclick="sendTab()">Tab</button>
+    <div class="card">
+      <h2>Terminal</h2>
+      <div class="toolbar">
+        <button class="tool-btn" id="focusTermBtn">Focus</button>
+        <button class="tool-btn" id="ctrlCBtn">Ctrl+C</button>
+        <button class="tool-btn" id="escBtn">Esc</button>
+        <button class="tool-btn" id="tabBtn">Tab</button>
       </div>
-      <div class="terminal-container terminal-only" id="terminalContainer">
+      <div class="terminal-container" id="terminalContainer">
         <div id="terminal"></div>
       </div>
     </div>
   </div>
-  
+
+  <!-- Chat mode: direct LLM connections (Anthropic, OpenAI) -->
+  <div id="chatSection" style="display:none">
+    <div class="card">
+      <h2>Chat</h2>
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <textarea id="messageInput" placeholder="Type your message..." rows="1"></textarea>
+        <button id="sendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+
   <div class="card pairing" id="pairingCard" style="display:none">
     <h2>Connect Your Phone</h2>
     <img id="qrCode" alt="QR Code"/>
@@ -376,294 +335,193 @@ const HOST_HTML = `<!DOCTYPE html>
     <p style="color:#888;font-size:.85rem">Scan QR or enter code in viewer</p>
   </div>
 </div>
-<script>
-// Import xterm dynamically to avoid bundling issues
-const loadTerminal = async () => {
-  if (window.Terminal) return;
-  const [{ Terminal }, { FitAddon }] = await Promise.all([
-    import('@xterm/xterm'),
-    import('@xterm/addon-fit')
-  ]);
-  window.Terminal = Terminal;
-  window.FitAddon = FitAddon;
-};
+<script type="module">
+import { Terminal } from 'https://esm.sh/@xterm/xterm@6';
+import { FitAddon } from 'https://esm.sh/@xterm/addon-fit@0.11';
 
-const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
-let cliPresets=[];
-let currentMode = null; // 'chat' or 'terminal'
+const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
 let term = null;
 let fitAddon = null;
+let termInitialized = false;
+let cliPresets = [];
 
-// Mode detection and UI switching
-function switchToMode(mode) {
-  if (currentMode === mode) return;
-  currentMode = mode;
-  
-  const chatMode = document.getElementById('chatMode');
-  const terminalMode = document.getElementById('terminalMode');
-  
-  if (mode === 'terminal') {
-    chatMode.style.display = 'none';
-    terminalMode.style.display = 'block';
-    document.body.classList.add('terminal-mode');
-    document.body.classList.remove('chat-mode');
-    initTerminal();
-  } else {
-    chatMode.style.display = 'block';
-    terminalMode.style.display = 'none';
-    document.body.classList.add('chat-mode');
-    document.body.classList.remove('terminal-mode');
-  }
-}
-
-// Terminal functionality
-async function initTerminal() {
-  if (term) return;
-  await loadTerminal();
-  
-  term = new window.Terminal({
+function initTerminal() {
+  if (termInitialized) return;
+  termInitialized = true;
+  term = new Terminal({
     cursorBlink: true,
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace',
     fontSize: 14,
     lineHeight: 1.25,
-    allowTransparency: true,
     scrollback: 5000,
     theme: {
-      background: '#05070c',
-      foreground: '#e6edf3',
-      cursor: '#7c8aff',
-      cursorAccent: '#05070c',
+      background: '#05070c', foreground: '#e6edf3', cursor: '#7c8aff', cursorAccent: '#05070c',
       selectionBackground: 'rgba(124,138,255,0.28)',
-      black: '#0a0d14',
-      red: '#ff7b72',
-      green: '#3fb950',
-      yellow: '#d29922',
-      blue: '#7c8aff',
-      magenta: '#bc8cff',
-      cyan: '#39c5cf',
-      white: '#c9d1d9',
-      brightBlack: '#6e7681',
-      brightRed: '#ffa198',
-      brightGreen: '#56d364',
-      brightYellow: '#e3b341',
-      brightBlue: '#a5b4ff',
-      brightMagenta: '#d2a8ff',
-      brightCyan: '#56d4dd',
-      brightWhite: '#f0f6fc',
+      black: '#0a0d14', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+      blue: '#7c8aff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
+      brightBlue: '#a5b4ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
     },
   });
-  
-  fitAddon = new window.FitAddon();
+  fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(document.getElementById('terminal'));
-  
   term.onData((data) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'terminal_input', data }));
-    }
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminal_input', data }));
   });
-  
-  // Handle terminal resize
-  const resizeObserver = new ResizeObserver(() => {
-    if (fitAddon && term) {
-      fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ 
-          type: 'terminal_resize', 
-          cols: term.cols, 
-          rows: term.rows 
-        }));
-      }
+  new ResizeObserver(() => {
+    fitAddon.fit();
+    if (ws.readyState === WebSocket.OPEN && term) {
+      ws.send(JSON.stringify({ type: 'terminal_resize', cols: term.cols, rows: term.rows }));
     }
-  });
-  resizeObserver.observe(document.getElementById('terminalContainer'));
-  
-  // Auto-focus terminal
+  }).observe(document.getElementById('terminalContainer'));
+  if (ws.readyState === WebSocket.OPEN) sendTerminalOpen();
+}
+
+function sendTerminalOpen() {
+  if (!term || !fitAddon) return;
+  fitAddon.fit();
+  ws.send(JSON.stringify({ type: 'terminal_open', cols: term.cols, rows: term.rows }));
   term.focus();
 }
 
-function focusTerminal() {
-  if (term) term.focus();
-}
+ws.onopen = () => { if (termInitialized) sendTerminalOpen(); };
 
-function sendCtrlC() {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'terminal_input', data: '\x03' }));
-  }
-  if (term) term.focus();
-}
-
-function sendEsc() {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'terminal_input', data: '\x1b' }));
-  }
-  if (term) term.focus();
-}
-
-function sendTab() {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'terminal_input', data: '\t' }));
-  }
-  if (term) term.focus();
-}
-
-// Load CLI presets for terminal mode
-fetch('/api/cli-presets').then(r=>r.json()).then(presets=>{
-  cliPresets=presets;
-  const sel=document.getElementById('cliPreset');
-  const shellOpt=document.createElement('option');
-  shellOpt.value='shell';
-  shellOpt.textContent='Shell (default)';
-  sel.appendChild(shellOpt);
-  presets.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o)});
-  sel.addEventListener('change',()=>{
-    const id=sel.value;
-    const p=cliPresets.find(x=>x.id===id);
-    const cmd=document.getElementById('command');
-    if(id==='shell'){cmd.style.display='none';cmd.value='';document.getElementById('presetDesc').textContent='Start an interactive login shell. Run commands directly in the phone terminal.';return;}
-    if(id==='custom'){cmd.style.display='';document.getElementById('presetDesc').textContent='Enter the exact launch command.';return;}
-    cmd.style.display='none';
-    document.getElementById('presetDesc').textContent=p?p.description:'';
-  });
-  sel.value='shell';
-  sel.dispatchEvent(new Event('change'));
-  return fetch('/api/config').then(r=>r.json());
-}).then(cfg=>{
-  if(!cfg) return;
-  const {saved}=cfg;
-  if(saved && (saved.type==='terminal' || saved.type==='cli')){
-    if(saved.preset) document.getElementById('cliPreset').value=saved.preset;
-    if(saved.command) document.getElementById('command').value=saved.command;
-    document.getElementById('cliPreset').dispatchEvent(new Event('change'));
-  }
-}).catch(()=>{});
-
-// WebSocket message handling
-ws.onmessage=e=>{
-  const d=JSON.parse(e.data);
-  if(d.type==='peer_connected'){
-    document.getElementById('dot').className='dot on';
-    document.getElementById('statusText').textContent='Phone connected';
-  }
-  else if(d.type==='peer_disconnected'){
-    document.getElementById('dot').className='dot wait';
-    document.getElementById('statusText').textContent='Phone disconnected';
-  }
-  else if(d.type==='terminal_configured'){
-    document.getElementById('launchText').textContent='Launch: '+d.terminalLaunch;
-    document.getElementById('statusText').textContent='Launch target updated';
-  }
-  else if(d.type==='configured'){
-    document.getElementById('statusText').textContent='AI adapter configured';
-  }
-  else if(d.type==='stream_chunk' && term){
+ws.onmessage = (e) => {
+  const d = JSON.parse(e.data);
+  if (d.type === 'peer_connected') {
+    document.getElementById('dot').className = 'dot on';
+    document.getElementById('statusText').textContent = 'Phone connected';
+  } else if (d.type === 'peer_disconnected') {
+    document.getElementById('dot').className = 'dot wait';
+    document.getElementById('statusText').textContent = 'Phone disconnected';
+  } else if (d.type === 'terminal_configured') {
+    document.getElementById('launchText').textContent = 'Launch: ' + d.terminalLaunch;
+  } else if (d.type === 'terminal_output' && term) {
     term.write(d.data);
-  }
-  else if(d.type==='stream_end' && term){
-    // Terminal stream ended
-  }
-  else if(d.type==='terminal_exit' && term){
-    const detail = typeof d.exitCode === 'number' ? \`exit \${d.exitCode}\` : 'terminated';
-    term.writeln(\`\r\n[terminal \${detail}]\`);
-  }
-  else if(d.type==='message'){
-    // Chat message - add to chat UI
-    const messagesDiv = document.getElementById('messages');
-    if (messagesDiv) {
-      const msgDiv = document.createElement('div');
-      msgDiv.className = \`msg \${d.role}\`;
-      msgDiv.textContent = d.content;
-      messagesDiv.appendChild(msgDiv);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  } else if (d.type === 'terminal_exit' && term) {
+    const code = typeof d.exitCode === 'number' ? \`exit \${d.exitCode}\` : 'terminated';
+    term.writeln(\`\r\n[terminal \${code}]\`);
+  } else if (d.type === 'stream_chunk') {
+    const msgs = document.getElementById('messages');
+    if (msgs) {
+      let last = msgs.lastElementChild;
+      if (!last || last.dataset.streaming !== 'true') {
+        last = document.createElement('div');
+        last.className = 'msg assistant';
+        last.dataset.streaming = 'true';
+        msgs.appendChild(last);
+      }
+      last.textContent += d.data;
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+  } else if (d.type === 'stream_end') {
+    const msgs = document.getElementById('messages');
+    if (msgs?.lastElementChild) delete msgs.lastElementChild.dataset.streaming;
+  } else if (d.type === 'message') {
+    const msgs = document.getElementById('messages');
+    if (msgs) {
+      const el = document.createElement('div');
+      el.className = \`msg \${d.role}\`;
+      el.textContent = d.content;
+      msgs.appendChild(el);
+      msgs.scrollTop = msgs.scrollHeight;
     }
   }
 };
 
-// Load initial status and determine mode
-fetch('/api/status').then(r=>r.json()).then(d=>{
-  if(d.terminalLaunch) document.getElementById('launchText').textContent='Launch: '+d.terminalLaunch;
-  if(d.pairingCode){
-    document.getElementById('pairingCard').style.display='';
-    document.getElementById('pairingCode').textContent=d.pairingCode;
-    if(d.pairingQR) document.getElementById('qrCode').src=d.pairingQR;
+fetch('/api/status').then(r => r.json()).then(d => {
+  if (d.terminalLaunch) document.getElementById('launchText').textContent = 'Launch: ' + d.terminalLaunch;
+  if (d.pairingCode) {
+    document.getElementById('pairingCard').style.display = '';
+    document.getElementById('pairingCode').textContent = d.pairingCode;
+    if (d.pairingQR) document.getElementById('qrCode').src = d.pairingQR;
   }
-  if(d.connected){
-    document.getElementById('dot').className='dot on';
-    document.getElementById('statusText').textContent='Phone connected';
-  } else{
-    document.getElementById('dot').className='dot wait';
-    document.getElementById('statusText').textContent='Waiting for phone...';
-  }
-  
-  // Determine mode: terminal mode if no adapter but has terminal launch
-  if (!d.adapter && d.terminalLaunch) {
-    switchToMode('terminal');
+  document.getElementById('dot').className = d.connected ? 'dot on' : 'dot wait';
+  document.getElementById('statusText').textContent = d.connected ? 'Phone connected' : 'Waiting for phone...';
+  if (d.adapter) {
+    document.getElementById('chatSection').style.display = '';
+    (d.messages || []).forEach(m => {
+      const msgs = document.getElementById('messages');
+      const el = document.createElement('div');
+      el.className = \`msg \${m.role}\`;
+      el.textContent = m.content;
+      msgs.appendChild(el);
+    });
   } else {
-    switchToMode('chat');
-    if (d.adapter) {
-      document.getElementById('chatCard').style.display = 'block';
-    }
+    document.getElementById('terminalSection').style.display = '';
+    initTerminal();
   }
 });
 
-// Configuration functions
-async function configureAdapter() {
-  const type = document.getElementById('adapterType').value;
-  const model = document.getElementById('model').value;
-  const apiKey = document.getElementById('apiKey').value;
-  
-  const response = await fetch('/api/configure', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, model, apiKey })
+fetch('/api/cli-presets').then(r => r.json()).then(presets => {
+  cliPresets = presets;
+  const sel = document.getElementById('cliPreset');
+  const shellOpt = document.createElement('option');
+  shellOpt.value = 'shell'; shellOpt.textContent = 'Shell (default)';
+  sel.appendChild(shellOpt);
+  presets.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p.id; o.textContent = p.name;
+    sel.appendChild(o);
   });
-  const result = await response.json();
-  if (result.error) {
-    alert(result.error);
-  } else {
-    document.getElementById('chatCard').style.display = 'block';
+  sel.addEventListener('change', () => {
+    const id = sel.value;
+    const p = cliPresets.find(x => x.id === id);
+    const cmd = document.getElementById('command');
+    const desc = document.getElementById('presetDesc');
+    if (id === 'shell') { cmd.style.display = 'none'; cmd.value = ''; desc.textContent = 'Interactive login shell.'; return; }
+    if (id === 'custom') { cmd.style.display = ''; desc.textContent = 'Enter the exact launch command.'; return; }
+    cmd.style.display = 'none';
+    desc.textContent = p ? p.description : '';
+  });
+  sel.value = 'shell'; sel.dispatchEvent(new Event('change'));
+  return fetch('/api/config').then(r => r.json());
+}).then(cfg => {
+  if (!cfg?.saved) return;
+  const { saved } = cfg;
+  if (saved.type === 'terminal' || saved.type === 'cli') {
+    if (saved.preset) document.getElementById('cliPreset').value = saved.preset;
+    if (saved.command) document.getElementById('command').value = saved.command;
+    document.getElementById('cliPreset').dispatchEvent(new Event('change'));
   }
-}
+}).catch(() => {});
 
-async function configureTerminal() {
+document.getElementById('applyLaunchBtn').addEventListener('click', async () => {
   const preset = document.getElementById('cliPreset').value;
   const command = document.getElementById('command').value;
-  
-  const response = await fetch('/api/configure', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: 'cli', preset, command })
-  });
-  const result = await response.json();
-  if (result.error) {
-    alert(result.error);
-  }
-}
+  const r = await fetch('/api/configure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'cli', preset, command }) });
+  const d = await r.json();
+  if (d.error) alert(d.error);
+});
 
-// Chat functionality
+document.getElementById('focusTermBtn').addEventListener('click', () => term?.focus());
+document.getElementById('ctrlCBtn').addEventListener('click', () => {
+  term?.focus();
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminal_input', data: '\x03' }));
+});
+document.getElementById('escBtn').addEventListener('click', () => {
+  term?.focus();
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminal_input', data: '\x1b' }));
+});
+document.getElementById('tabBtn').addEventListener('click', () => {
+  term?.focus();
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'terminal_input', data: '\t' }));
+});
+
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('messageInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
 function sendMessage() {
   const input = document.getElementById('messageInput');
   const content = input.value.trim();
   if (!content) return;
-  
-  fetch('/api/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content })
-  }).then(() => {
-    input.value = '';
-  }).catch(err => {
-    console.error('Failed to send message:', err);
-  });
+  fetch('/api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) })
+    .then(() => { input.value = ''; })
+    .catch(err => console.error('Failed to send:', err));
 }
-
-// Handle Enter key in chat input
-document.getElementById('messageInput')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
 </script>
 </body>
 </html>`;

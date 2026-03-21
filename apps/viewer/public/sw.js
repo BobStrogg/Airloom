@@ -1,6 +1,6 @@
 // Airloom viewer service worker — cache-first so the page works
 // even when the host LAN server is no longer reachable.
-const CACHE = 'airloom-v2';
+const CACHE = 'airloom-v3';
 
 self.addEventListener('install', (event) => {
   // Activate immediately, don't wait for old SW to retire
