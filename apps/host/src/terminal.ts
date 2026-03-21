@@ -128,6 +128,7 @@ export class TerminalSession {
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
     const file = resolveExecutable(command.file) ?? command.file;
     console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows})`);
+    console.log(`[host] Working dir: ${process.cwd()}, Node: ${process.version}, Platform: ${process.platform}`);
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
     try {
@@ -140,6 +141,11 @@ export class TerminalSession {
       });
     } catch (err) {
       console.error('[host] PTY spawn failed:', (err as Error).message);
+      console.error('[host] File exists:', existsSync(file));
+      console.error('[host] Full error:', err);
+      if (err instanceof Error) {
+        console.error('[host] Stack:', err.stack);
+      }
       return;
     }
 
