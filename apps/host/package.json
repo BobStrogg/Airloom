@@ -33,8 +33,8 @@
   "scripts": {
     "dev": "pnpm build:host-only && pnpm copy-viewer && node dist/index.js",
     "start": "node dist/index.js",
-    "build": "pnpm --dir ../viewer build && tsup && pnpm copy-viewer",
-    "build:host-only": "tsup",
+    "build": "pnpm --dir ../viewer build && node build.mjs && pnpm copy-viewer",
+    "build:host-only": "node build.mjs",
     "copy-viewer": "node -e \"import('node:fs').then(f=>{const s='../viewer/dist';if(f.existsSync(s))f.cpSync(s,'dist/viewer',{recursive:true});else console.log('viewer/dist not found')})\""
   },
   "engines": {
