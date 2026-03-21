@@ -31,10 +31,11 @@
     "@types/ws": "^8.5.0"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "pnpm build:host-only && pnpm copy-viewer && node dist/index.js",
     "start": "node dist/index.js",
-    "build": "pnpm --dir ../viewer build && tsup && node -e \"import('node:fs').then(f=>{const s='../viewer/dist';if(f.existsSync(s))f.cpSync(s,'dist/viewer',{recursive:true})})\"",
-    "build:host-only": "tsup"
+    "build": "pnpm --dir ../viewer build && tsup && pnpm copy-viewer",
+    "build:host-only": "tsup",
+    "copy-viewer": "node -e \"import('node:fs').then(f=>{const s='../viewer/dist';if(f.existsSync(s))f.cpSync(s,'dist/viewer',{recursive:true});else console.log('viewer/dist not found')})\""
   },
   "engines": {
     "node": ">=18"
