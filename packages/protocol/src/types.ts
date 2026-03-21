@@ -16,6 +16,46 @@ export type ChannelMessage =
   | { type: 'stream_chunk'; id: string; data: string }
   | { type: 'stream_end'; id: string };
 
+export interface TerminalOpenMessage {
+  type: 'terminal_open';
+  cols: number;
+  rows: number;
+}
+
+export interface TerminalInputMessage {
+  type: 'terminal_input';
+  data: string;
+}
+
+export interface TerminalResizeMessage {
+  type: 'terminal_resize';
+  cols: number;
+  rows: number;
+}
+
+export interface TerminalCloseMessage {
+  type: 'terminal_close';
+}
+
+export interface TerminalExitMessage {
+  type: 'terminal_exit';
+  exitCode?: number;
+  signal?: number;
+}
+
+export type TerminalMessage =
+  | TerminalOpenMessage
+  | TerminalInputMessage
+  | TerminalResizeMessage
+  | TerminalCloseMessage
+  | TerminalExitMessage;
+
+export interface TerminalStreamMeta {
+  kind: 'terminal';
+  cols?: number;
+  rows?: number;
+}
+
 // Pairing data embedded in QR code
 export interface PairingData {
   relay: string;       // relay WebSocket URL or Ably identifier
