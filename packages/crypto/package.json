@@ -11,5 +11,5 @@
     "@noble/hashes": "^1.7.0",
     "@airloom/protocol": "workspace:*"
   },
-  "scripts": { "build": "tsup src/index.ts --format esm --dts" }
+  "scripts": { "build": "tsup src/index.ts --format esm --dts --tsconfig tsconfig.build.json" }
 }
