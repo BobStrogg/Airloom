@@ -87,6 +87,7 @@ class AdaptiveOutputBatcher {
     if (!this.buffer) return;
     const data = this.buffer;
     this.buffer = '';
+    console.log(`[terminal] Flushing ${data.length} chars to stream`);
     this.onFlush(data);
   }
 
@@ -162,6 +163,7 @@ export class TerminalSession {
     this.batcher = new AdaptiveOutputBatcher((data) => this.stream?.write(data));
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
+    console.log(`[terminal] Spawning: ${file} ${command.args.join(' ')}`);
     this.pty = spawn(file, command.args, {
       name: 'xterm-256color',
       cols: this.cols,
@@ -175,6 +177,7 @@ export class TerminalSession {
       this.broadcastFn?.({ type: 'terminal_output', data });
     });
     this.pty.onExit(({ exitCode, signal }) => {
+      console.log(`[terminal] PTY exited: code=${exitCode}, signal=${signal}`);
       this.batcher?.flush();
       this.stream?.end();
       this.channel.send({ type: 'terminal_exit', exitCode, signal } satisfies TerminalExitMessage);
@@ -185,14 +188,22 @@ export class TerminalSession {
   }
 
   private writeInput(message: TerminalInputMessage): void {
-    if (!this.pty) return;
+    if (!this.pty) {
+      console.log(`[terminal] Input ignored - no PTY: ${JSON.stringify(message.data)}`);
+      return;
+    }
     this.batcher?.noteInput();
+    console.log(`[terminal] Input: ${JSON.stringify(message.data)}`);
     this.pty.write(message.data);
   }
 
   writeRawInput(data: string): void {
-    if (!this.pty) return;
+    if (!this.pty) {
+      console.log(`[terminal] Raw input ignored - no PTY: ${JSON.stringify(data)}`);
+      return;
+    }
     this.batcher?.noteInput();
+    console.log(`[terminal] Raw input: ${JSON.stringify(data)}`);
     this.pty.write(data);
   }
 
