@@ -193,12 +193,18 @@ async function main() {
   await channel.connect(session.sessionToken);
   console.log('[host] Connected to relay, waiting for phone...');
 
+  const savedConfig = loadConfig();
   const launchPreset = cliArgs.preset ? CLI_PRESETS.find((p) => p.id === cliArgs.preset) : undefined;
   if (cliArgs.preset && !launchPreset) {
     console.error(`[host] Unknown preset "${cliArgs.preset}". Available: ${CLI_PRESETS.map((p) => p.id).join(', ')}`);
     process.exit(1);
   }
-  const launchCommand = cliArgs.cli ?? launchPreset?.command;
+  const savedTerminalCommand = (!cliArgs.cli && !cliArgs.preset && savedConfig?.type === 'terminal')
+    ? (savedConfig.command ?? (savedConfig.preset && savedConfig.preset !== 'shell'
+      ? CLI_PRESETS.find((p) => p.id === savedConfig.preset)?.command
+      : undefined))
+    : undefined;
+  const launchCommand = cliArgs.cli ?? launchPreset?.command ?? savedTerminalCommand;
   const terminalLaunch = getTerminalLaunchDisplay(launchCommand);
 
   const state: ServerState = {
@@ -209,6 +215,7 @@ async function main() {
     relayUrl: useAbly ? 'ably' : RELAY_URL!,
     connected: false,
     terminalLaunch,
+    terminalLaunchCommand: launchCommand,
     messages: [],
   };
 
@@ -313,7 +320,7 @@ async function main() {
     exec(`${cmd} ${localUrl}`);
   }).catch(() => {});
 
-  const terminal = new TerminalSession(channel, launchCommand);
+  const terminal = new TerminalSession(channel, () => state.terminalLaunchCommand);
 
   // Channel events
   channel.on('ready', () => {

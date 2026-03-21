@@ -9,6 +9,7 @@ import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { CLIAdapter, CLI_PRESETS } from './adapters/cli.js';
 import { loadConfig, saveConfig } from './config.js';
+import { getTerminalLaunchDisplay } from './terminal.js';
 import type { SavedConfig } from './config.js';
 
 export interface ServerState {
@@ -19,6 +20,7 @@ export interface ServerState {
   relayUrl: string;
   connected: boolean;
   terminalLaunch: string;
+  terminalLaunchCommand?: string;
   messages: Array<{ role: string; content: string; timestamp: number }>;
 }
 
@@ -103,25 +105,29 @@ export function createHostServer(opts: {
           break;
         }
         case 'cli': {
-          const cmd = command || process.env.AIRLOOM_CLI_COMMAND;
-          if (!cmd) { res.status(400).json({ error: 'CLI adapter requires a command (or set AIRLOOM_CLI_COMMAND env var)' }); return; }
-          // Look up preset to get mode & silenceTimeout
-          const presetInfo = preset ? CLI_PRESETS.find((p) => p.id === preset) : undefined;
-          opts.state.adapter = new CLIAdapter({
-            command: cmd, model,
-            mode: presetInfo?.mode,
-            silenceTimeout: presetInfo?.silenceTimeout,
-          });
-          break;
+          const selectedPreset = typeof preset === 'string' ? preset : 'shell';
+          const presetInfo = CLI_PRESETS.find((p) => p.id === selectedPreset);
+          const cmd = selectedPreset === 'shell'
+            ? undefined
+            : (typeof command === 'string' && command.trim())
+              ? command.trim()
+              : presetInfo?.command;
+          opts.state.terminalLaunchCommand = cmd;
+          opts.state.terminalLaunch = getTerminalLaunchDisplay(cmd);
+          opts.state.adapter = null;
+          const cfg: SavedConfig = { type: 'terminal', preset: selectedPreset, command: cmd };
+          saveConfig(cfg);
+          broadcast({ type: 'terminal_configured', terminalLaunch: opts.state.terminalLaunch });
+          res.json({ ok: true, terminalLaunch: opts.state.terminalLaunch });
+          return;
         }
         default: res.status(400).json({ error: 'Unknown adapter type' }); return;
       }
-      // Persist selection (never saves API keys — those come from env vars or re-entry)
       const cfg: SavedConfig = { type };
       if (model) cfg.model = model;
       if (type === 'cli') { cfg.command = command; cfg.preset = preset; }
       saveConfig(cfg);
-      broadcast({ type: 'configured', adapter: { name: opts.state.adapter.name, model: opts.state.adapter.model } });
+      broadcast({ type: 'configured', adapter: { name: opts.state.adapter?.name ?? 'none', model: opts.state.adapter?.model ?? '' } });
       res.json({ ok: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Configuration failed';
@@ -282,17 +288,12 @@ const HOST_HTML = `<!DOCTYPE html>
     <p style="color:#888;font-size:.9rem;margin-top:8px" id="launchText">Launch: current shell</p>
   </div>
   <div class="card" id="configCard">
-    <h2>AI Configuration</h2>
+    <h2>Launch Configuration</h2>
     <div class="config-form">
-      <select id="adapterType"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI (GPT)</option><option value="cli">CLI Tool</option></select>
-      <input type="password" id="apiKey" placeholder="API Key"/>
-      <input type="text" id="model" placeholder="Model (optional)"/>
-      <div id="cliConfig" style="display:none">
-        <select id="cliPreset" style="margin-bottom:8px"></select>
-        <input type="text" id="command" placeholder="CLI command (prompt appended as last arg)"/>
-        <p style="color:#666;font-size:.8rem;margin-top:4px" id="presetDesc"></p>
-      </div>
-      <button onclick="configure()">Configure</button>
+      <select id="cliPreset"></select>
+      <input type="text" id="command" placeholder="Custom launch command" style="display:none"/>
+      <p style="color:#666;font-size:.8rem;margin-top:4px" id="presetDesc"></p>
+      <button onclick="configure()">Apply Launch Target</button>
     </div>
   </div>
   <div class="card pairing" id="pairingCard" style="display:none">
@@ -301,81 +302,62 @@ const HOST_HTML = `<!DOCTYPE html>
     <div class="pairing-code" id="pairingCode"></div>
     <p style="color:#888;font-size:.85rem">Scan QR or enter code in viewer</p>
   </div>
-  <div class="card" id="chatCard" style="display:none">
-    <h2>Conversation</h2>
-    <div class="messages" id="messages"></div>
-    <div class="input-area">
-      <textarea id="msgInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
-      <button onclick="sendMsg()">Send</button>
-    </div>
-  </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script>
-if(typeof marked!=='undefined'){marked.setOptions({gfm:true,breaks:true})}
-function renderMd(t){try{return typeof marked!=='undefined'?marked.parse(t):'<pre>'+t.replace(/</g,'&lt;')+'</pre>'}catch{return '<pre>'+t.replace(/</g,'&lt;')+'</pre>'}}
 const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
-let curResp='',streamEl=null,cliPresets=[];
-// Load CLI presets
+let cliPresets=[];
+
 fetch('/api/cli-presets').then(r=>r.json()).then(presets=>{
   cliPresets=presets;
   const sel=document.getElementById('cliPreset');
+  const shellOpt=document.createElement('option');
+  shellOpt.value='shell';
+  shellOpt.textContent='Shell (default)';
+  sel.appendChild(shellOpt);
   presets.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o)});
   sel.addEventListener('change',()=>{
-    const p=cliPresets.find(x=>x.id===sel.value);
-    if(p){document.getElementById('command').value=p.command;document.getElementById('presetDesc').textContent=p.description;document.getElementById('command').style.display=p.id==='custom'?'':''}
+    const id=sel.value;
+    const p=cliPresets.find(x=>x.id===id);
+    const cmd=document.getElementById('command');
+    if(id==='shell'){cmd.style.display='none';cmd.value='';document.getElementById('presetDesc').textContent='Start an interactive login shell. Run commands directly in the phone terminal.';return;}
+    if(id==='custom'){cmd.style.display='';document.getElementById('presetDesc').textContent='Enter the exact launch command.';return;}
+    cmd.style.display='none';
+    document.getElementById('presetDesc').textContent=p?p.description:'';
   });
-  if(presets.length){sel.dispatchEvent(new Event('change'))}
-  // After presets are loaded, restore saved config
+  sel.value='shell';
+  sel.dispatchEvent(new Event('change'));
   return fetch('/api/config').then(r=>r.json());
 }).then(cfg=>{
   if(!cfg) return;
-  const {saved,envKeys}=cfg;
-  if(saved){
-    document.getElementById('adapterType').value=saved.type;
-    document.getElementById('adapterType').dispatchEvent(new Event('change'));
-    if(saved.model) document.getElementById('model').value=saved.model;
-    if(saved.type==='cli'){
-      if(saved.preset){document.getElementById('cliPreset').value=saved.preset;document.getElementById('cliPreset').dispatchEvent(new Event('change'))}
-      if(saved.command) document.getElementById('command').value=saved.command;
-    }
+  const {saved}=cfg;
+  if(saved && (saved.type==='terminal' || saved.type==='cli')){
+    if(saved.preset) document.getElementById('cliPreset').value=saved.preset;
+    if(saved.command) document.getElementById('command').value=saved.command;
+    document.getElementById('cliPreset').dispatchEvent(new Event('change'));
   }
-  // Show hints for env-var API keys
-  if(envKeys.anthropic) document.getElementById('apiKey').placeholder='API Key (ANTHROPIC_API_KEY set)';
-  if(envKeys.openai&&(!saved||saved.type==='openai')) document.getElementById('apiKey').placeholder='API Key (OPENAI_API_KEY set)';
 }).catch(()=>{});
-document.getElementById('adapterType').addEventListener('change',e=>{
-  const cli=e.target.value==='cli';
-  document.getElementById('apiKey').style.display=cli?'none':'';
-  document.getElementById('model').style.display=cli?'none':'';
-  document.getElementById('cliConfig').style.display=cli?'':'none';
-});
+
 ws.onmessage=e=>{
   const d=JSON.parse(e.data);
-  if(d.type==='message'){addMsg(d.role,d.content);if(d.role==='user'){streamEl=addMsg('assistant','');streamEl.classList.add('typing');streamEl.innerHTML='<span class="dot"></span><span class="dot"></span><span class="dot"></span>';curResp=''}}
-  else if(d.type==='stream_chunk'){if(!streamEl){streamEl=addMsg('assistant','');streamEl.classList.add('typing');streamEl.innerHTML='<span class="dot"></span><span class="dot"></span><span class="dot"></span>'}curResp+=d.data;const trimmed=curResp.trimStart();if(trimmed){if(streamEl.classList.contains('typing'))streamEl.classList.remove('typing');streamEl.innerHTML=renderMd(trimmed)}streamEl.scrollIntoView({block:'end'})}
-  else if(d.type==='stream_end'){streamEl=null;curResp=''}
-  else if(d.type==='configured'){document.getElementById('statusText').textContent='Configured: '+d.adapter.name+' ('+d.adapter.model+')'}
-  else if(d.type==='peer_connected'){document.getElementById('dot').className='dot on';document.getElementById('statusText').textContent='Phone connected';document.getElementById('chatCard').style.display=''}
+  if(d.type==='peer_connected'){document.getElementById('dot').className='dot on';document.getElementById('statusText').textContent='Phone connected'}
   else if(d.type==='peer_disconnected'){document.getElementById('dot').className='dot wait';document.getElementById('statusText').textContent='Phone disconnected'}
+  else if(d.type==='terminal_configured'){document.getElementById('launchText').textContent='Launch: '+d.terminalLaunch;document.getElementById('statusText').textContent='Launch target updated'}
 };
+
 fetch('/api/status').then(r=>r.json()).then(d=>{
   if(d.terminalLaunch) document.getElementById('launchText').textContent='Launch: '+d.terminalLaunch;
   if(d.pairingCode){document.getElementById('pairingCard').style.display='';document.getElementById('pairingCode').textContent=d.pairingCode;if(d.pairingQR)document.getElementById('qrCode').src=d.pairingQR}
-  if(d.connected){document.getElementById('dot').className='dot on';document.getElementById('statusText').textContent='Phone connected';document.getElementById('chatCard').style.display=''}
+  if(d.connected){document.getElementById('dot').className='dot on';document.getElementById('statusText').textContent='Phone connected'}
   else{document.getElementById('dot').className='dot wait';document.getElementById('statusText').textContent='Waiting for phone...'}
-  if(d.adapter)document.getElementById('statusText').textContent+=' | '+d.adapter.name;
-  if(d.messages)d.messages.forEach(m=>addMsg(m.role,m.content));
 });
+
 async function configure(){
-  const r=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:document.getElementById('adapterType').value,apiKey:document.getElementById('apiKey').value,model:document.getElementById('model').value,command:document.getElementById('command').value,preset:document.getElementById('cliPreset').value})});
-  const d=await r.json();if(d.error)alert(d.error);
+  const preset=document.getElementById('cliPreset').value;
+  const command=document.getElementById('command').value;
+  const r=await fetch('/api/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'cli',preset,command})});
+  const d=await r.json();
+  if(d.error) alert(d.error);
 }
-async function sendMsg(){
-  const el=document.getElementById('msgInput'),c=el.value.trim();if(!c)return;el.value='';
-  await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:c})});
-}
-function addMsg(role,content){const el=document.createElement('div');el.className='msg '+role;if(role==='user'||!content){el.textContent=content}else{el.innerHTML=renderMd(content)}document.getElementById('messages').appendChild(el);el.scrollIntoView({block:'end'});return el}
 </script>
 </body>
 </html>`;

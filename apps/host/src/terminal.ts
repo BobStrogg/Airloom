@@ -115,7 +115,7 @@ export class TerminalSession {
 
   constructor(
     private readonly channel: Channel,
-    private readonly launchCommand?: string,
+    private readonly getLaunchCommand?: () => string | undefined,
   ) {}
 
   handleMessage(message: TerminalMessage): void {
@@ -154,7 +154,7 @@ export class TerminalSession {
       return;
     }
 
-    const command = getDefaultTerminalCommand(this.launchCommand);
+    const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
     const file = resolveExecutable(command.file) ?? command.file;
     const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
