@@ -11,24 +11,13 @@ function debug(msg: string) {
   console.log(msg);
 }
 
+// Unregister any previously-installed service worker so stale cached
+// versions of the viewer don't block updates.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js')
-    .then((reg) => (reg.active ? Promise.resolve() : new Promise<void>((r) => {
-      const sw = reg.installing ?? reg.waiting;
-      if (sw) sw.addEventListener('statechange', () => { if (sw.state === 'activated') r(); });
-      else r();
-    })).then(async () => {
-      const cache = await caches.open('airloom-v4');
-      const pageUrl = location.href.split('#')[0];
-      const pageHit = await cache.match(pageUrl);
-      if (!pageHit) await cache.add(pageUrl).catch(() => {});
-      const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
-      const urls = entries
-        .map((e) => e.name)
-        .filter((u) => { try { return new URL(u).origin === location.origin; } catch { return false; } });
-      await Promise.all(urls.map((u) => cache.match(u).then((hit) => { if (!hit) return cache.add(u).catch(() => {}); })));
-    }))
-    .catch(() => {});
+  navigator.serviceWorker.getRegistrations().then((regs) =>
+    regs.forEach((r) => r.unregister()),
+  );
+  caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
 }
 
 const connectScreen = document.getElementById('connectScreen')!;
