@@ -267,37 +267,39 @@ const HOST_HTML = `<!DOCTYPE html>
 <title>Airloom - Host</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
 <style>
+  :root{color-scheme:light dark;--bg:#0a0a0a;--surface:#1a1a1a;--border:#2a2a2a;--text:#e0e0e0;--text-muted:#888;--accent:#7c8aff;--accent-hover:#6b79ee;--input-bg:#111;--input-border:#333;--term-bg:#05070c;--tool-bg:#333;--tool-hover:#444;--msg-user:#2a3a6a;--msg-asst:#1e1e1e}
+  @media(prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#1c1c1e;--tool-bg:#e5e5ea;--tool-hover:#d1d1d6;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
   .container{max-width:800px;margin:0 auto;padding:20px}
   .page-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
   .page-header svg{width:36px;height:36px;flex-shrink:0}
-  .page-header h1{font-size:1.5rem;color:#7c8aff}
-  h2{font-size:1.1rem;margin-bottom:12px;color:#a0a0a0}
-  .card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:20px;margin-bottom:16px}
+  .page-header h1{font-size:1.5rem;color:var(--accent)}
+  h2{font-size:1.1rem;margin-bottom:12px;color:var(--text-muted)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
   .status{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .dot{width:8px;height:8px;border-radius:50%}
   .dot.on{background:#4caf50} .dot.off{background:#f44336} .dot.wait{background:#ff9800;animation:pulse 1.5s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
   .pairing{text-align:center}
   .pairing img{max-width:200px;margin:16px auto;display:block;border-radius:8px}
-  .pairing-code{font-family:monospace;font-size:2rem;letter-spacing:4px;color:#7c8aff;margin:12px 0}
+  .pairing-code{font-family:monospace;font-size:2rem;letter-spacing:4px;color:var(--accent);margin:12px 0}
   .config-form{display:flex;flex-direction:column;gap:12px}
-  select,input,button{padding:10px 14px;border-radius:8px;border:1px solid #333;background:#111;color:#e0e0e0;font-size:.95rem}
-  select:focus,input:focus{outline:none;border-color:#7c8aff}
-  button{background:#7c8aff;color:#fff;border:none;cursor:pointer;font-weight:600}
-  button:hover{background:#6b79ee}
+  select,input,button{padding:10px 14px;border-radius:8px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);font-size:.95rem}
+  select:focus,input:focus{outline:none;border-color:var(--accent)}
+  button{background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600}
+  button:hover{background:var(--accent-hover)}
   .messages{max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
   .msg{padding:10px 14px;border-radius:10px;max-width:85%;word-break:break-word;font-size:.9rem;line-height:1.5;white-space:pre-wrap}
-  .msg.user{background:#2a3a6a;align-self:flex-end}
-  .msg.assistant{background:#1e1e1e;border:1px solid #2a2a2a;align-self:flex-start}
+  .msg.user{background:var(--msg-user);align-self:flex-end}
+  .msg.assistant{background:var(--msg-asst);border:1px solid var(--border);align-self:flex-start}
   .input-area{display:flex;gap:8px}
-  .input-area textarea{flex:1;resize:none;min-height:44px;max-height:120px;padding:10px 14px;border-radius:8px;border:1px solid #333;background:#111;color:#e0e0e0;font-family:inherit;font-size:.9rem}
-  .terminal-container{background:#05070c;border:1px solid #2a2a2a;border-radius:8px;height:420px;overflow:hidden;margin-bottom:12px}
+  .input-area textarea{flex:1;resize:none;min-height:44px;max-height:120px;padding:10px 14px;border-radius:8px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);font-family:inherit;font-size:.9rem}
+  .terminal-container{background:var(--term-bg);border:1px solid var(--border);border-radius:8px;height:420px;overflow:hidden;margin-bottom:12px}
   #terminal{width:100%;height:100%;padding:8px}
   .toolbar{display:flex;gap:8px;margin-bottom:12px}
-  .tool-btn{padding:6px 12px;font-size:.85rem;background:#333;border:none;border-radius:6px;color:#e0e0e0;cursor:pointer}
-  .tool-btn:hover{background:#444}
+  .tool-btn{padding:6px 12px;font-size:.85rem;background:var(--tool-bg);border:none;border-radius:6px;color:var(--text);cursor:pointer}
+  .tool-btn:hover{background:var(--tool-hover)}
 </style>
 </head>
 <body>
@@ -308,14 +310,14 @@ const HOST_HTML = `<!DOCTYPE html>
   </div>
   <div class="card">
     <div class="status"><div class="dot wait" id="dot"></div><span id="statusText">Initializing...</span></div>
-    <p style="color:#888;font-size:.9rem;margin-top:8px" id="launchText">Launch: current shell</p>
+    <p style="color:var(--text-muted);font-size:.9rem;margin-top:8px" id="launchText">Launch: current shell</p>
   </div>
 
   <div class="card pairing" id="pairingCard" style="display:none">
     <h2>Connect Your Phone</h2>
     <img id="qrCode" alt="QR Code"/>
     <div class="pairing-code" id="pairingCode"></div>
-    <p style="color:#888;font-size:.85rem">Scan QR or enter code in viewer</p>
+    <p style="color:var(--text-muted);font-size:.85rem">Scan QR or enter code in viewer</p>
   </div>
 
   <!-- Terminal mode: shell, Devin, Codex etc. (default when no AI adapter) -->
@@ -325,7 +327,7 @@ const HOST_HTML = `<!DOCTYPE html>
       <div class="config-form">
         <select id="cliPreset"></select>
         <input type="text" id="command" placeholder="Custom launch command" style="display:none"/>
-        <p style="color:#666;font-size:.8rem;margin-top:4px" id="presetDesc"></p>
+        <p style="color:var(--text-muted);font-size:.8rem;margin-top:4px" id="presetDesc"></p>
         <button id="applyLaunchBtn">Apply Launch Target</button>
       </div>
     </div>
@@ -366,6 +368,27 @@ let fitAddon = null;
 let termInitialized = false;
 let cliPresets = [];
 
+const darkTheme = {
+  background: '#05070c', foreground: '#e6edf3', cursor: '#7c8aff', cursorAccent: '#05070c',
+  selectionBackground: 'rgba(124,138,255,0.28)',
+  black: '#0a0d14', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+  blue: '#7c8aff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
+  brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
+  brightBlue: '#a5b4ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+};
+const lightTheme = {
+  background: '#1c1c1e', foreground: '#e6edf3', cursor: '#5856d6', cursorAccent: '#1c1c1e',
+  selectionBackground: 'rgba(88,86,214,0.30)',
+  black: '#1c1c1e', red: '#ff3b30', green: '#34c759', yellow: '#ff9f0a',
+  blue: '#5856d6', magenta: '#bf5af2', cyan: '#32d5d5', white: '#d1d1d6',
+  brightBlack: '#6e6e73', brightRed: '#ff6961', brightGreen: '#4cd964', brightYellow: '#ffd60a',
+  brightBlue: '#7c7aff', brightMagenta: '#da8aff', brightCyan: '#5ac8fa', brightWhite: '#f2f2f7',
+};
+function getTheme() { return matchMedia('(prefers-color-scheme:light)').matches ? lightTheme : darkTheme; }
+matchMedia('(prefers-color-scheme:light)').addEventListener('change', () => {
+  if (term) term.options.theme = getTheme();
+});
+
 function initTerminal() {
   if (termInitialized) return;
   termInitialized = true;
@@ -375,14 +398,7 @@ function initTerminal() {
     fontSize: 14,
     lineHeight: 1.25,
     scrollback: 5000,
-    theme: {
-      background: '#05070c', foreground: '#e6edf3', cursor: '#7c8aff', cursorAccent: '#05070c',
-      selectionBackground: 'rgba(124,138,255,0.28)',
-      black: '#0a0d14', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
-      blue: '#7c8aff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#c9d1d9',
-      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
-      brightBlue: '#a5b4ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
-    },
+    theme: getTheme(),
   });
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);

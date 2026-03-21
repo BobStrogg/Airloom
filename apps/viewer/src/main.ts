@@ -74,6 +74,58 @@ function restoreConnectionParams() {
   } catch {}
 }
 
+const darkTermTheme = {
+  background: '#05070c',
+  foreground: '#e6edf3',
+  cursor: '#7c8aff',
+  cursorAccent: '#05070c',
+  selectionBackground: 'rgba(124,138,255,0.28)',
+  black: '#0a0d14',
+  red: '#ff7b72',
+  green: '#3fb950',
+  yellow: '#d29922',
+  blue: '#7c8aff',
+  magenta: '#bc8cff',
+  cyan: '#39c5cf',
+  white: '#c9d1d9',
+  brightBlack: '#6e7681',
+  brightRed: '#ffa198',
+  brightGreen: '#56d364',
+  brightYellow: '#e3b341',
+  brightBlue: '#a5b4ff',
+  brightMagenta: '#d2a8ff',
+  brightCyan: '#56d4dd',
+  brightWhite: '#f0f6fc',
+};
+
+const lightTermTheme = {
+  background: '#1c1c1e',
+  foreground: '#e6edf3',
+  cursor: '#5856d6',
+  cursorAccent: '#1c1c1e',
+  selectionBackground: 'rgba(88,86,214,0.30)',
+  black: '#1c1c1e',
+  red: '#ff3b30',
+  green: '#34c759',
+  yellow: '#ff9f0a',
+  blue: '#5856d6',
+  magenta: '#bf5af2',
+  cyan: '#32d5d5',
+  white: '#d1d1d6',
+  brightBlack: '#6e6e73',
+  brightRed: '#ff6961',
+  brightGreen: '#4cd964',
+  brightYellow: '#ffd60a',
+  brightBlue: '#7c7aff',
+  brightMagenta: '#da8aff',
+  brightCyan: '#5ac8fa',
+  brightWhite: '#f2f2f7',
+};
+
+function getTermTheme() {
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? lightTermTheme : darkTermTheme;
+}
+
 function ensureTerminal() {
   if (term) return;
   term = new Terminal({
@@ -83,29 +135,7 @@ function ensureTerminal() {
     lineHeight: 1.25,
     allowTransparency: true,
     scrollback: 5000,
-    theme: {
-      background: '#05070c',
-      foreground: '#e6edf3',
-      cursor: '#7c8aff',
-      cursorAccent: '#05070c',
-      selectionBackground: 'rgba(124,138,255,0.28)',
-      black: '#0a0d14',
-      red: '#ff7b72',
-      green: '#3fb950',
-      yellow: '#d29922',
-      blue: '#7c8aff',
-      magenta: '#bc8cff',
-      cyan: '#39c5cf',
-      white: '#c9d1d9',
-      brightBlack: '#6e7681',
-      brightRed: '#ffa198',
-      brightGreen: '#56d364',
-      brightYellow: '#e3b341',
-      brightBlue: '#a5b4ff',
-      brightMagenta: '#d2a8ff',
-      brightCyan: '#56d4dd',
-      brightWhite: '#f0f6fc',
-    },
+    theme: getTermTheme(),
   });
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
@@ -129,6 +159,11 @@ function ensureTerminal() {
   resizeObserver = new ResizeObserver(() => fitAndSyncTerminal());
   resizeObserver.observe(terminalContainer);
 }
+
+// Live-switch the xterm theme when the system color scheme changes
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+  term?.options && (term.options.theme = getTermTheme());
+});
 
 let lastSentCols = 0;
 let lastSentRows = 0;
