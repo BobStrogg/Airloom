@@ -18,6 +18,7 @@ export interface ServerState {
   pairingQR: string;
   relayUrl: string;
   connected: boolean;
+  terminalLaunch: string;
   messages: Array<{ role: string; content: string; timestamp: number }>;
 }
 
@@ -66,6 +67,7 @@ export function createHostServer(opts: {
       pairingQR: opts.state.pairingQR,
       relayUrl: opts.state.relayUrl,
       adapter: opts.state.adapter ? { name: opts.state.adapter.name, model: opts.state.adapter.model } : null,
+      terminalLaunch: opts.state.terminalLaunch,
       messages: opts.state.messages,
     });
   });
@@ -277,6 +279,7 @@ const HOST_HTML = `<!DOCTYPE html>
   </div>
   <div class="card">
     <div class="status"><div class="dot wait" id="dot"></div><span id="statusText">Initializing...</span></div>
+    <p style="color:#888;font-size:.9rem;margin-top:8px" id="launchText">Launch: current shell</p>
   </div>
   <div class="card" id="configCard">
     <h2>AI Configuration</h2>
@@ -357,6 +360,7 @@ ws.onmessage=e=>{
   else if(d.type==='peer_disconnected'){document.getElementById('dot').className='dot wait';document.getElementById('statusText').textContent='Phone disconnected'}
 };
 fetch('/api/status').then(r=>r.json()).then(d=>{
+  if(d.terminalLaunch) document.getElementById('launchText').textContent='Launch: '+d.terminalLaunch;
   if(d.pairingCode){document.getElementById('pairingCard').style.display='';document.getElementById('pairingCode').textContent=d.pairingCode;if(d.pairingQR)document.getElementById('qrCode').src=d.pairingQR}
   if(d.connected){document.getElementById('dot').className='dot on';document.getElementById('statusText').textContent='Phone connected';document.getElementById('chatCard').style.display=''}
   else{document.getElementById('dot').className='dot wait';document.getElementById('statusText').textContent='Waiting for phone...'}
