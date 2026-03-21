@@ -142,12 +142,13 @@ function ensureTerminal() {
 }
 
 function fitAndSyncTerminal(openIfNeeded = false) {
-  if (!term || !fitAddon) return;
+  if (!term || !fitAddon) { debug('[viewer] fitAndSyncTerminal: no term or fitAddon'); return; }
   fitAddon.fit();
-  if (!channel || !terminalReady) return;
+  if (!channel || !terminalReady) { debug('[viewer] fitAndSyncTerminal: no channel or not ready'); return; }
   const message: TerminalMessage = openIfNeeded
     ? { type: 'terminal_open', cols: term.cols, rows: term.rows }
     : { type: 'terminal_resize', cols: term.cols, rows: term.rows };
+  debug(`[viewer] Sending ${message.type} (${term.cols}x${term.rows})`);
   channel.send(message);
 }
 
@@ -293,6 +294,8 @@ async function connectWithCode() {
       if (res.ok) {
         const data = await res.json() as { token: string; transport: 'ably' | 'ws'; relay: string };
         saveConnectionParams(codeInput.value, data.relay);
+        // Save session for home screen auto-reconnect (same as QR flow)
+        saveLastSession({ session: sessionToken, token: data.token, transport: data.transport, relay: data.relay, hostOrigin: origin });
         await doConnect(data.relay, sessionToken, encryptionKey, data.transport, data.token);
         return;
       }
@@ -358,6 +361,7 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
       terminalScreen.style.display = 'flex';
       setTerminalStatus('Connected');
       ensureTerminal();
+      debug('[viewer] Terminal ensured, calling fitAndSyncTerminal(true)');
       requestAnimationFrame(() => {
         fitAndSyncTerminal(true);
         term?.focus();
