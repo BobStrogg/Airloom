@@ -320,7 +320,8 @@ async function main() {
     exec(`${cmd} ${localUrl}`);
   }).catch(() => {});
 
-  const terminal = new TerminalSession(channel, () => state.terminalLaunchCommand);
+  const terminal = new TerminalSession(channel, () => state.terminalLaunchCommand, broadcast);
+  state.terminal = terminal;
 
   // Channel events
   channel.on('ready', () => {
