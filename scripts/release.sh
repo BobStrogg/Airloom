@@ -5,9 +5,9 @@ set -euo pipefail
 #
 # Usage: ./scripts/release.sh
 #
-# Prompts you to choose patch / minor / major with a preview,
-# then commits, tags, and pushes automatically.
-# The GitHub Actions workflow publishes to npm when the tag lands.
+# Builds everything (host + viewer + GitHub Pages), prompts for a version bump,
+# commits, tags, and pushes. GitHub Actions then publishes to npm and deploys
+# the updated GitHub Pages viewer.
 
 # Ensure we're at the repo root
 cd "$(git rev-parse --show-toplevel)"
@@ -17,6 +17,19 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Error: working tree is dirty. Commit or stash changes first."
   exit 1
 fi
+
+# ── Build everything ────────────────────────────────────────────
+echo ""
+echo "Building host + viewer + GitHub Pages..."
+echo ""
+
+pnpm --filter airloom build
+pnpm build:pages
+
+echo ""
+echo "Build complete."
+
+# ── Version bump ────────────────────────────────────────────────
 
 # Read current version
 CURRENT=$(node -p "require('./apps/host/package.json').version")
@@ -51,8 +64,8 @@ cd apps/host
 npm version "$BUMP" --no-git-tag-version > /dev/null
 cd ../..
 
-# Commit, tag, push
-git add apps/host/package.json
+# ── Commit, tag, push ──────────────────────────────────────────
+git add apps/host/package.json docs/
 git commit -m "${NEW_VERSION}"
 git tag "${NEW_VERSION}"
 git push
@@ -60,3 +73,4 @@ git push --tags
 
 echo ""
 echo "Pushed ${NEW_VERSION} — GitHub Actions will publish to npm."
+echo "GitHub Pages will also be updated (docs/ included in the commit)."
