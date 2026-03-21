@@ -268,7 +268,7 @@ const HOST_HTML = `<!DOCTYPE html>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
 <style>
   :root{color-scheme:light dark;--bg:#0a0a0a;--surface:#1a1a1a;--border:#2a2a2a;--text:#e0e0e0;--text-muted:#888;--accent:#7c8aff;--accent-hover:#6b79ee;--input-bg:#111;--input-border:#333;--term-bg:#05070c;--tool-bg:#333;--tool-hover:#444;--msg-user:#2a3a6a;--msg-asst:#1e1e1e}
-  @media(prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#1c1c1e;--tool-bg:#e5e5ea;--tool-hover:#d1d1d6;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
+  @media(prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#fff;--tool-bg:#e5e5ea;--tool-hover:#d1d1d6;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
   .container{max-width:800px;margin:0 auto;padding:20px}
@@ -377,12 +377,12 @@ const darkTheme = {
   brightBlue: '#a5b4ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
 };
 const lightTheme = {
-  background: '#1c1c1e', foreground: '#e6edf3', cursor: '#5856d6', cursorAccent: '#1c1c1e',
-  selectionBackground: 'rgba(88,86,214,0.30)',
-  black: '#1c1c1e', red: '#ff3b30', green: '#34c759', yellow: '#ff9f0a',
-  blue: '#5856d6', magenta: '#bf5af2', cyan: '#32d5d5', white: '#d1d1d6',
-  brightBlack: '#6e6e73', brightRed: '#ff6961', brightGreen: '#4cd964', brightYellow: '#ffd60a',
-  brightBlue: '#7c7aff', brightMagenta: '#da8aff', brightCyan: '#5ac8fa', brightWhite: '#f2f2f7',
+  background: '#ffffff', foreground: '#1c1c1e', cursor: '#5856d6', cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(88,86,214,0.20)',
+  black: '#1c1c1e', red: '#c41a16', green: '#007400', yellow: '#826b28',
+  blue: '#0000ff', magenta: '#a90d91', cyan: '#3e8a8a', white: '#e5e5ea',
+  brightBlack: '#6e6e73', brightRed: '#eb4d3d', brightGreen: '#36b738', brightYellow: '#b79a14',
+  brightBlue: '#0451a5', brightMagenta: '#c42275', brightCyan: '#318495', brightWhite: '#f2f2f7',
 };
 function getTheme() { return matchMedia('(prefers-color-scheme:light)').matches ? lightTheme : darkTheme; }
 matchMedia('(prefers-color-scheme:light)').addEventListener('change', () => {
