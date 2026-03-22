@@ -144,6 +144,7 @@ function ensureTerminal() {
     lineHeight: 1.25,
     allowTransparency: true,
     scrollback: 5000,
+    smoothScrollDuration: 80,
     theme: getTermTheme(),
   });
   fitAddon = new FitAddon();
@@ -171,22 +172,26 @@ function ensureTerminal() {
   // a simple touch-to-scroll bridge so mobile users can scroll the terminal.
   {
     let touchY: number | null = null;
+    let remainder = 0;
     const cellH = () => term!.options.lineHeight! * term!.options.fontSize!;
     terminalEl.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 1) touchY = e.touches[0].clientY;
+      if (e.touches.length === 1) { touchY = e.touches[0].clientY; remainder = 0; }
     }, { passive: true });
     terminalEl.addEventListener('touchmove', (e) => {
       if (touchY === null || e.touches.length !== 1 || !term) return;
       const dy = touchY - e.touches[0].clientY;
-      const lines = Math.trunc(dy / cellH());
+      touchY = e.touches[0].clientY;
+      const h = cellH();
+      remainder += dy;
+      const lines = Math.trunc(remainder / h);
       if (lines !== 0) {
         term.scrollLines(lines);
-        touchY = e.touches[0].clientY;
+        remainder -= lines * h;
       }
       e.preventDefault();
     }, { passive: false });
-    terminalEl.addEventListener('touchend', () => { touchY = null; }, { passive: true });
-    terminalEl.addEventListener('touchcancel', () => { touchY = null; }, { passive: true });
+    terminalEl.addEventListener('touchend', () => { touchY = null; remainder = 0; }, { passive: true });
+    terminalEl.addEventListener('touchcancel', () => { touchY = null; remainder = 0; }, { passive: true });
   }
 
   resizeObserver = new ResizeObserver(() => fitAndSyncTerminal());
