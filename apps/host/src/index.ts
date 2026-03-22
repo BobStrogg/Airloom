@@ -1,7 +1,7 @@
 import { Channel, WebSocketAdapter, AblyAdapter } from '@airloom/channel';
 import type { RelayAdapter } from '@airloom/channel';
-import { createSession, formatPairingCode, deriveEncryptionKey } from '@airloom/crypto';
-import { encodePairingData } from '@airloom/protocol';
+import { createSession, formatPairingCode, deriveEncryptionKey, deriveSessionToken, generateKeyPair } from '@airloom/crypto';
+import { encodePairingData, randomCode, toBase64, type SessionRefreshMessage } from '@airloom/protocol';
 import type { PairingData } from '@airloom/protocol';
 import { sha256 } from '@noble/hashes/sha256';
 import { networkInterfaces } from 'node:os';
@@ -15,6 +15,9 @@ import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { CLIAdapter, CLI_PRESETS } from './adapters/cli.js';
 import { TerminalSession, getTerminalLaunchDisplay, isTerminalMessage } from './terminal.js';
+import { parseHostEnv, isLoopbackBind } from './env.js';
+import { loadOrCreateAblySessionToken } from './state.js';
+import { createControlToken, encodeControlUrl } from './security.js';
 
 // Lazy import qrcode to avoid tsx ETIMEDOUT issues on macOS
 let QRCode: typeof import('qrcode') | null = null;
@@ -81,6 +84,7 @@ Environment variables:
   RELAY_URL           Self-hosted WebSocket relay URL (disables Ably).
   VIEWER_URL          Public viewer URL (default: GitHub Pages).
   HOST_PORT           Same as --port (CLI flag takes precedence).
+  HOST_BIND           Host bind address (default: 127.0.0.1).
 `.trimStart());
 }
 
@@ -91,28 +95,20 @@ if (cliArgs.help) {
   process.exit(0);
 }
 
-// Default community relay key — restricted to airloom:* channels (publish/subscribe/presence only).
-// Users can override with ABLY_API_KEY for their own quota, or set RELAY_URL for self-hosted WS.
-const DEFAULT_ABLY_KEY = 'SfHSAQ.IRTOQQ:FBbi9a7ZV6jIu0Gdo_UeYhIN4rzpMrud5-LldURNh9s';
-
-// Public viewer URL (GitHub Pages). Pairing data goes in the hash fragment,
-// which is never sent to the server — only the browser sees it.
-const DEFAULT_VIEWER_URL = 'https://bobstrogg.github.io/Airloom/';
-const VIEWER_URL = process.env.VIEWER_URL ?? DEFAULT_VIEWER_URL;
-
 // Dev mode: running from local repo (not from npm/node_modules).
 // When true, the QR code points to the locally-served LAN viewer so the phone
 // uses the latest local build instead of the published GitHub Pages version.
 const IS_DEV = !process.env.VIEWER_URL && !new URL(import.meta.url).pathname.includes('node_modules');
 
-const RELAY_URL = process.env.RELAY_URL;
-const ABLY_API_KEY = process.env.ABLY_API_KEY ?? (RELAY_URL ? undefined : DEFAULT_ABLY_KEY);
-const ABLY_TOKEN_TTL = parseInt(process.env.ABLY_TOKEN_TTL ?? String(24 * 60 * 60 * 1000), 10); // default 24h
-const HOST_PORT = cliArgs.port ?? parseInt(process.env.HOST_PORT ?? '0', 10); // 0 = auto-select free port
-
-// Use Ably unless RELAY_URL is explicitly set
-const useAbly = !!ABLY_API_KEY;
-const isDefaultKey = useAbly && ABLY_API_KEY === DEFAULT_ABLY_KEY;
+const env = parseHostEnv(cliArgs.port);
+const VIEWER_URL = env.viewerUrl;
+const RELAY_URL = env.relayUrl;
+const ABLY_API_KEY = env.ablyApiKey;
+const ABLY_TOKEN_TTL = env.ablyTokenTtlMs;
+const HOST_PORT = env.hostPort;
+const HOST_BIND = env.hostBind;
+const useAbly = env.useAbly;
+const isDefaultKey = env.isDefaultAblyKey;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -152,49 +148,54 @@ async function main() {
     console.log(`Transport: WebSocket (self-hosted relay at ${RELAY_URL})`);
   }
 
-  // Create session with keypair and pairing code
-  const session = createSession(useAbly ? 'ably' : RELAY_URL!);
-  const displayCode = formatPairingCode(session.pairingCode);
-
-  // Build pairing data
+  let pairingCode: string;
+  let pairingSessionToken: string;
+  let relaySessionToken: string;
   let pairingData: PairingData;
+  let ablyToken: string | undefined;
+  let ablyTokenExpiresAt: number | undefined;
   if (useAbly) {
-    // Mint a scoped, time-limited token for the viewer using Ably REST API.
-    // The API key (default or custom) never leaves the host.
+    pairingCode = randomCode(8);
+    pairingSessionToken = deriveSessionToken(pairingCode);
+    relaySessionToken = loadOrCreateAblySessionToken();
+    const keyPair = generateKeyPair();
     const { Rest } = await import('ably');
     const rest = new Rest({
       key: ABLY_API_KEY!,
       queryTime: true,
     });
-    const channelName = `airloom:${session.sessionToken}`;
-    // Scope the token to airloom:* (not just this session's channel) so that a
-    // saved token survives host restarts.  When the host creates a new session the
-    // viewer's home-screen shortcut can reuse the stored token with the new
-    // session's channel.  Security isn't weakened: all payload data is E2E
-    // encrypted with a key derived from the pairing code, so the relay (Ably)
-    // only ever sees ciphertext.
+    const channelName = `airloom:${relaySessionToken}`;
     const tokenDetails = await rest.auth.requestToken({
-      clientId: '*', // viewer picks its own clientId
-      capability: { 'airloom:*': ['publish', 'subscribe', 'presence'] },
+      clientId: '*',
+      capability: { [channelName]: ['publish', 'subscribe', 'presence'] },
       ttl: ABLY_TOKEN_TTL,
     });
     console.log(`[ably] Scoped token issued (TTL: ${Math.round(ABLY_TOKEN_TTL / 60000)}min, channel: ${channelName})`);
 
+    ablyToken = tokenDetails.token;
+    ablyTokenExpiresAt = tokenDetails.expires;
     pairingData = {
-      ...session.pairingData,
+      relay: 'ably',
+      session: relaySessionToken,
+      pub: toBase64(keyPair.publicKey),
+      v: 1,
       transport: 'ably',
-      token: tokenDetails.token,
+      token: ablyToken,
+      tokenExpiresAt: ablyTokenExpiresAt,
     };
   } else {
+    const session = createSession(RELAY_URL!);
+    pairingCode = session.pairingCode;
+    pairingSessionToken = session.sessionToken;
+    relaySessionToken = session.sessionToken;
     pairingData = { ...session.pairingData };
   }
+  const displayCode = formatPairingCode(pairingCode);
   const pairingJSON = encodePairingData(pairingData);
 
-  // Derive encryption key from session token (both sides do this identically)
-  const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + session.sessionToken));
+  const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + relaySessionToken));
   const encryptionKey = deriveEncryptionKey(keyMaterial);
 
-  // Create adapter based on transport
   let adapter: RelayAdapter;
   if (useAbly) {
     adapter = new AblyAdapter({ key: ABLY_API_KEY! });
@@ -208,8 +209,7 @@ async function main() {
     encryptionKey,
   });
 
-  // Connect to relay
-  await channel.connect(session.sessionToken);
+  await channel.connect(relaySessionToken);
   console.log('[host] Connected to relay, waiting for phone...');
 
   const savedConfig = loadConfig();
@@ -236,8 +236,10 @@ async function main() {
     terminalLaunch,
     terminalLaunchCommand: launchCommand,
     messages: [],
-    sessionToken: session.sessionToken,
-    ablyToken: useAbly ? (pairingData as { token?: string }).token : undefined,
+    pairingSessionToken,
+    relaySessionToken,
+    ablyToken,
+    ablyTokenExpiresAt,
     transport: useAbly ? 'ably' : 'ws',
   };
 
@@ -304,7 +306,14 @@ async function main() {
     console.log('[host] Viewer dist not found — QR will open raw JSON fallback');
   }
 
-  const { server, broadcast, port } = await createHostServer({ port: HOST_PORT, state, viewerDir });
+  const controlToken = createControlToken();
+  const { server, broadcast, port } = await createHostServer({
+    port: HOST_PORT,
+    bind: HOST_BIND,
+    controlToken,
+    state,
+    viewerDir,
+  });
 
   // Build the QR content — a URL that opens the viewer on the phone.
   // In dev mode (running from source), the QR points to the locally-served LAN
@@ -317,7 +326,7 @@ async function main() {
   const lanIP = getLanIP();
   const lanHost = lanIP ?? 'localhost';
   const lanBaseUrl = `http://${lanHost}:${port}`;
-  const lanViewerUrl = viewerDir ? `${lanBaseUrl}/viewer/#${pairingBase64}` : null;
+  const lanViewerUrl = viewerDir && !isLoopbackBind(HOST_BIND) ? `${lanBaseUrl}/viewer/#${pairingBase64}` : null;
 
   // Dev mode uses LAN viewer; production uses GitHub Pages
   const qrTarget = (IS_DEV && lanViewerUrl) ? lanViewerUrl : pagesUrl;
@@ -340,22 +349,36 @@ async function main() {
   if (!useAbly) console.log(`Relay: ${RELAY_URL}`);
 
   const localUrl = `http://localhost:${port}`;
-  console.log(`[host] Web UI at ${localUrl}\n`);
+  const controlUrl = encodeControlUrl(localUrl, controlToken);
+  console.log(`[host] Web UI at ${controlUrl}\n`);
 
   // Auto-open browser so the phone can scan a proper QR image
   import('node:child_process').then(({ exec }) => {
     const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-    exec(`${cmd} ${localUrl}`);
+    exec(`${cmd} ${controlUrl}`);
   }).catch(() => {});
 
   const terminal = new TerminalSession(channel, () => state.terminalLaunchCommand, broadcast);
   state.terminal = terminal;
+  const pushViewerSession = () => {
+    if (!state.relaySessionToken || !state.transport) return;
+    const refresh: SessionRefreshMessage = {
+      type: 'session_refresh',
+      relay: state.relayUrl,
+      session: state.relaySessionToken,
+      transport: state.transport,
+      token: state.ablyToken,
+      tokenExpiresAt: state.ablyTokenExpiresAt,
+    };
+    channel.send(refresh);
+  };
 
   // Channel events
   channel.on('ready', () => {
     console.log('[host] Phone connected! Channel ready.');
     state.connected = true;
     broadcast({ type: 'peer_connected' });
+    pushViewerSession();
   });
 
   channel.on('peer_left', () => {

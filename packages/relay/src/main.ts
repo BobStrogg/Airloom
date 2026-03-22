@@ -2,7 +2,11 @@
 
 import { createRelayServer } from './server.js';
 
-const port = parseInt(process.env.RELAY_PORT ?? '4500', 10);
+const rawPort = process.env.RELAY_PORT ?? '4500';
+const port = Number.parseInt(rawPort, 10);
+if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+  throw new Error('RELAY_PORT must be an integer between 1 and 65535');
+}
 
 const server = createRelayServer({ port });
 

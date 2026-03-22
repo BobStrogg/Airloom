@@ -6,5 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
-  "scripts": { "build": "tsup src/index.ts --format esm --dts --tsconfig tsconfig.build.json" }
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --tsconfig tsconfig.build.json",
+    "test": "node --import tsx --test src/codec.test.ts"
+  }
 }

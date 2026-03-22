@@ -64,6 +64,7 @@ export interface PairingData {
   v: number;           // protocol version
   transport?: 'ws' | 'ably'; // transport type (default: 'ws')
   token?: string;      // scoped Ably token for viewer auth (never the root key)
+  tokenExpiresAt?: number;
 }
 
 // Session info held by the host
@@ -86,4 +87,13 @@ export interface AdapterConfig {
   apiKey?: string;
   model?: string;
   command?: string; // for CLI adapter
+}
+
+export interface SessionRefreshMessage {
+  type: 'session_refresh';
+  relay: string;
+  session: string;
+  transport: 'ws' | 'ably';
+  token?: string;
+  tokenExpiresAt?: number;
 }

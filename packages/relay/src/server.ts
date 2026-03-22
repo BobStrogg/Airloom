@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { SessionManager } from './session.js';
 import { RateLimiter, DEFAULT_LIMITS, type RateLimitConfig } from './limits.js';
@@ -17,7 +18,22 @@ export function createRelayServer(opts: RelayServerOptions) {
   const sessions = new SessionManager();
   const limiters = new Map<string, RateLimiter>();
   const maxPayload = opts.limits?.maxMessageSize ?? DEFAULT_LIMITS.maxMessageSize;
-  const wss = new WebSocketServer({ port: opts.port, maxPayload });
+  const httpServer = createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/healthz') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      });
+      res.end(JSON.stringify({ ok: true, sessions: sessions.size }));
+      return;
+    }
+    res.writeHead(404, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+  const wss = new WebSocketServer({ server: httpServer, maxPayload });
 
   // Heartbeat: detect half-open connections
   const aliveSet = new WeakSet<WebSocket>();
@@ -141,9 +157,12 @@ export function createRelayServer(opts: RelayServerOptions) {
     });
   });
 
-  console.log(`[relay] Listening on ws://localhost:${opts.port}`);
+  httpServer.listen(opts.port, () => {
+    console.log(`[relay] Listening on ws://localhost:${opts.port}`);
+  });
 
   return {
+    server: httpServer,
     wss,
     sessions,
     close() {
@@ -151,6 +170,7 @@ export function createRelayServer(opts: RelayServerOptions) {
       sessions.destroy();
       limiters.clear();
       wss.close();
+      httpServer.close();
     },
   };
 }

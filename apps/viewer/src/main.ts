@@ -1,11 +1,21 @@
 import { Channel, WebSocketAdapter, AblyAdapter, type ReadStream } from '@airloom/channel';
 import type { RelayAdapter } from '@airloom/channel';
 import { deriveSessionToken, deriveEncryptionKey, parsePairingCode } from '@airloom/crypto';
-import { decodePairingData, type TerminalExitMessage, type TerminalMessage, type TerminalStreamMeta } from '@airloom/protocol';
+import { parsePairingInput, type SessionRefreshMessage, type TerminalExitMessage, type TerminalMessage, type TerminalStreamMeta } from '@airloom/protocol';
 import { sha256 } from '@noble/hashes/sha256';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import {
+  buildCodeConnectPlan,
+  canAutoReconnectSavedSession,
+  fetchPairingSession,
+  getNextStoredRelay,
+  getRelayInputPlaceholder,
+  normalizeStoredRelay,
+  type CodeConnectAttempt,
+} from './pairing.js';
+import { clearSavedSession, loadSavedSession, saveSavedSession } from './session-store.js';
 
 function debug(msg: string) {
   console.log(msg);
@@ -44,35 +54,33 @@ let fitAddon: FitAddon | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let terminalReady = false;
 let connecting = false;
-
-interface SavedSession { session: string; token?: string; transport: 'ws' | 'ably'; relay: string; hostOrigin?: string; }
+const PEER_READY_TIMEOUT_MS = 8000;
+const CODE_CONNECT_FAILURE_MESSAGE = 'Could not connect with this code. Scan the QR code once or enter your WebSocket relay URL.';
 
 function saveConnectionParams(_code: string | null, relayUrl: string) {
   try {
-    localStorage.setItem('airloom:lastRelay', relayUrl);
+    const nextRelay = getNextStoredRelay(localStorage.getItem('airloom:lastRelay'), relayUrl);
+    if (nextRelay) {
+      localStorage.setItem('airloom:lastRelay', nextRelay);
+    } else {
+      localStorage.removeItem('airloom:lastRelay');
+    }
   } catch {}
-}
-
-function saveLastSession(s: SavedSession) {
-  try { localStorage.setItem('airloom:lastSession', JSON.stringify(s)); } catch {}
-}
-
-function loadLastSession(): SavedSession | null {
-  try {
-    const raw = localStorage.getItem('airloom:lastSession');
-    return raw ? (JSON.parse(raw) as SavedSession) : null;
-  } catch { return null; }
-}
-
-function clearLastSession() {
-  try { localStorage.removeItem('airloom:lastSession'); } catch {}
 }
 
 function restoreConnectionParams() {
   try {
-    const relay = localStorage.getItem('airloom:lastRelay');
-    if (relay && !relayInput.value) relayInput.value = relay;
+    const relay = normalizeStoredRelay(localStorage.getItem('airloom:lastRelay'));
+    if (relay && !relayInput.value) {
+      relayInput.value = relay;
+    } else if (!relay) {
+      localStorage.removeItem('airloom:lastRelay');
+    }
   } catch {}
+}
+
+function syncRelayInputPlaceholder() {
+  relayInput.placeholder = getRelayInputPlaceholder(location.hostname);
 }
 
 const darkTermTheme = {
@@ -218,6 +226,7 @@ function resetConnectionUI() {
 }
 
 restoreConnectionParams();
+syncRelayInputPlaceholder();
 
 // Shrink the app to the visual viewport height so the terminal stays visible
 // when the phone keyboard appears. Also collapses the header in landscape mode
@@ -294,30 +303,21 @@ disconnectBtn.addEventListener('click', () => {
     // Clear the hash immediately so if the user adds to home screen the saved URL
     // is the clean base URL, not a stale pairing URL with an expiring token.
     history.replaceState(null, '', location.pathname + location.search);
-    try {
-      const json = atob(hash.replace(/-/g, '+').replace(/_/g, '/'));
-      await connectWithQR(json);
-    } catch { /* ignore */ }
-    if (!channel) hideError();
+    await connectWithQR(hash);
     return;
   }
 
-  // No hash — try to auto-reconnect using the last saved session (for home screen opens).
-  const saved = loadLastSession();
-  if (!saved) return;
+  const saved = await loadSavedSession();
+  if (!canAutoReconnectSavedSession(saved)) return;
   showStatus('Reconnecting...');
   const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + saved.session));
   const encryptionKey = deriveEncryptionKey(keyMaterial);
-  try {
-    // 8-second peer timeout: if the host is on a new session it will never appear,
-    // so fail cleanly rather than hanging on "waiting for host".
-    await doConnect(saved.relay, saved.session, encryptionKey, saved.transport, saved.token, 8000);
-  } catch (err) {
-    debug(`[viewer] Auto-reconnect failed: ${err instanceof Error ? err.message : err}`);
-  }
-  if (!channel) {
-    // Saved session is stale — clear it and show clean connect screen
-    clearLastSession();
+  const reconnected = await doConnect(saved.relay, saved.session, encryptionKey, saved.transport, saved.token, {
+    waitForReadyTimeoutMs: PEER_READY_TIMEOUT_MS,
+    suppressFailureUI: true,
+  });
+  if (!reconnected || !channel) {
+    await clearSavedSession();
     hideError();
     hideStatus();
   }
@@ -327,54 +327,115 @@ async function connectWithCode() {
   if (connecting) return;
   const raw = parsePairingCode(codeInput.value);
   if (raw.length !== 8) { showError('Code must be 8 characters'); return; }
-  const sessionToken = deriveSessionToken(raw);
-  const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + sessionToken));
-  const encryptionKey = deriveEncryptionKey(keyMaterial);
+  const pairingSessionToken = deriveSessionToken(raw);
+  const saved = await loadSavedSession();
+  const pairSession = await fetchPairingSession(fetch, location.origin, pairingSessionToken);
 
-  // Ask the host for its current Ably token using the session derived from the code.
-  // Try the current page origin first (we're served from the host on LAN), then any
-  // saved host origin from a previous QR connection.
-  const saved = loadLastSession();
-  const originsToTry = [...new Set([location.origin, saved?.hostOrigin].filter(Boolean) as string[])];
-  for (const origin of originsToTry) {
-    try {
-      const res = await fetch(`${origin}/api/pair?session=${encodeURIComponent(sessionToken)}`);
-      if (res.ok) {
-        const data = await res.json() as { token: string; transport: 'ably' | 'ws'; relay: string };
-        saveConnectionParams(codeInput.value, data.relay);
-        // Save session for home screen auto-reconnect (same as QR flow)
-        saveLastSession({ session: sessionToken, token: data.token, transport: data.transport, relay: data.relay, hostOrigin: origin });
-        await doConnect(data.relay, sessionToken, encryptionKey, data.transport, data.token);
-        return;
-      }
-    } catch { /* try next origin */ }
+  // When the viewer is served by the host (same-origin), the host can exchange
+  // the code-derived session token for the current transport details.
+  // QR payloads are untrusted, so only the current page origin can answer this.
+  const connectPlan = buildCodeConnectPlan({
+    pairSession,
+    saved,
+    relayInputValue: relayInput.value,
+    viewerHostname: location.hostname,
+  });
+
+  for (const attempt of connectPlan.attempts) {
+    if (await tryCodeConnectAttempt(attempt, pairingSessionToken)) {
+      return;
+    }
   }
 
-  // /api/pair failed — fall back to the saved Ably token from a previous QR session.
-  // This covers the home-screen / cross-origin case where the host isn't reachable
-  // via HTTP but Ably relay still works.
-  if (saved?.token && saved.transport === 'ably') {
-    saveLastSession({ ...saved, session: sessionToken });
-    await doConnect(saved.relay, sessionToken, encryptionKey, 'ably', saved.token);
+  const fallbackCount = connectPlan.attempts.filter((attempt) => attempt.kind !== 'pair-session').length;
+  if (connectPlan.relayInputError && fallbackCount === 0) {
+    showError(connectPlan.relayInputError);
     return;
   }
+  if (connectPlan.relayInputError) {
+    showError(`${CODE_CONNECT_FAILURE_MESSAGE} ${connectPlan.relayInputError} if you enter one.`);
+    return;
+  }
+  showError(CODE_CONNECT_FAILURE_MESSAGE);
+}
 
-  // Last resort: try self-hosted WS relay (for users who run their own relay)
-  const relayUrl = relayInput.value.trim() || 'ws://localhost:4500';
-  saveConnectionParams(codeInput.value, relayUrl);
-  await doConnect(relayUrl, sessionToken, encryptionKey);
+async function tryCodeConnectAttempt(
+  attempt: CodeConnectAttempt,
+  pairingSessionToken: string,
+): Promise<boolean> {
+  if (attempt.kind === 'pair-session') {
+    const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + attempt.session));
+    const encryptionKey = deriveEncryptionKey(keyMaterial);
+    const connected = await doConnect(attempt.relay, attempt.session, encryptionKey, attempt.transport, attempt.token, {
+      waitForReadyTimeoutMs: PEER_READY_TIMEOUT_MS,
+      suppressFailureUI: true,
+    });
+    if (connected) {
+      saveConnectionParams(codeInput.value, attempt.relay);
+      await saveSavedSession({
+        session: attempt.session,
+        token: attempt.token,
+        tokenExpiresAt: attempt.tokenExpiresAt,
+        transport: attempt.transport,
+        relay: attempt.relay,
+      });
+    }
+    return connected;
+  }
+
+  if (attempt.kind === 'saved-ably') {
+    const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + attempt.session));
+    const encryptionKey = deriveEncryptionKey(keyMaterial);
+    const connected = await doConnect(attempt.relay, attempt.session, encryptionKey, 'ably', attempt.token, {
+      waitForReadyTimeoutMs: PEER_READY_TIMEOUT_MS,
+      suppressFailureUI: true,
+    });
+    if (connected) {
+      await saveSavedSession({
+        session: attempt.session,
+        token: attempt.token,
+        tokenExpiresAt: attempt.tokenExpiresAt,
+        transport: 'ably',
+        relay: attempt.relay,
+      });
+    }
+    return connected;
+  }
+
+  const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + pairingSessionToken));
+  const encryptionKey = deriveEncryptionKey(keyMaterial);
+  const connected = await doConnect(attempt.relay, pairingSessionToken, encryptionKey, 'ws', undefined, {
+    waitForReadyTimeoutMs: PEER_READY_TIMEOUT_MS,
+    suppressFailureUI: true,
+  });
+  if (connected) {
+    saveConnectionParams(codeInput.value, attempt.relay);
+    await saveSavedSession({
+      session: pairingSessionToken,
+      transport: 'ws',
+      relay: attempt.relay,
+    });
+  }
+  return connected;
 }
 
 async function connectWithQR(qrText: string) {
   try {
-    const data = decodePairingData(qrText);
-    saveConnectionParams(null, data.relay);
+    const data = parsePairingInput(qrText);
     const transport = data.transport ?? 'ws';
-    // Save session for home screen auto-reconnect
-    saveLastSession({ session: data.session, token: data.token, transport, relay: data.relay, hostOrigin: location.origin });
     const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + data.session));
     const encryptionKey = deriveEncryptionKey(keyMaterial);
-    await doConnect(data.relay, data.session, encryptionKey, transport, data.token);
+    const connected = await doConnect(data.relay, data.session, encryptionKey, transport, data.token);
+    if (connected) {
+      saveConnectionParams(null, data.relay);
+      await saveSavedSession({
+        session: data.session,
+        token: data.token,
+        tokenExpiresAt: data.tokenExpiresAt,
+        transport,
+        relay: data.relay,
+      });
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     showError('Invalid QR code: ' + message);
@@ -386,36 +447,44 @@ function isTerminalStream(stream: ReadStream): boolean {
   return meta?.kind === 'terminal';
 }
 
-async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: Uint8Array, transport: 'ws' | 'ably' = 'ws', token?: string, peerTimeoutMs = 0) {
+function isSessionRefreshMessage(data: unknown): data is SessionRefreshMessage {
+  if (!data || typeof data !== 'object' || !('type' in data)) return false;
+  const message = data as Record<string, unknown>;
+  if (message.type !== 'session_refresh') return false;
+  if (typeof message.session !== 'string' || typeof message.relay !== 'string') return false;
+  if (message.transport !== 'ws' && message.transport !== 'ably') return false;
+  if (message.token !== undefined && typeof message.token !== 'string') return false;
+  if (message.tokenExpiresAt !== undefined && typeof message.tokenExpiresAt !== 'number') return false;
+  return true;
+}
+
+interface ConnectOptions {
+  waitForReadyTimeoutMs?: number;
+  suppressFailureUI?: boolean;
+}
+
+async function doConnect(
+  relayUrl: string,
+  sessionToken: string,
+  encryptionKey: Uint8Array,
+  transport: 'ws' | 'ably' = 'ws',
+  token?: string,
+  opts: ConnectOptions = {},
+): Promise<boolean> {
   connecting = true;
   showStatus('Connecting...');
   hideError();
   try {
     let adapter: RelayAdapter;
     if (transport === 'ably') {
-      if (!token) { showError('Ably transport requires a token'); return; }
+      if (!token) throw new Error('Ably transport requires a token');
       adapter = new AblyAdapter({ token });
     } else {
       adapter = new WebSocketAdapter(relayUrl);
     }
     channel = new Channel({ adapter, role: 'viewer', encryptionKey });
 
-    let peerTimer: ReturnType<typeof setTimeout> | null = null;
-    if (peerTimeoutMs > 0) {
-      peerTimer = setTimeout(() => {
-        if (!terminalReady) {
-          connecting = false;
-          const c = channel;
-          channel = null;
-          c?.close();
-          hideError();
-          hideStatus();
-        }
-      }, peerTimeoutMs);
-    }
-
     channel.on('ready', () => {
-      if (peerTimer) { clearTimeout(peerTimer); peerTimer = null; }
       connecting = false;
       debug('[viewer] Channel ready');
       terminalReady = true;
@@ -436,6 +505,16 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
     });
     channel.on('message', (data: unknown) => {
       if (!data || typeof data !== 'object' || !('type' in data)) return;
+      if (isSessionRefreshMessage(data)) {
+        void saveSavedSession({
+          session: data.session,
+          token: data.token,
+          tokenExpiresAt: data.tokenExpiresAt,
+          transport: data.transport,
+          relay: data.relay,
+        });
+        return;
+      }
       if ((data as TerminalExitMessage).type === 'terminal_exit') {
         const exit = data as TerminalExitMessage;
         const detail = typeof exit.exitCode === 'number' ? `exit ${exit.exitCode}` : 'terminated';
@@ -466,13 +545,24 @@ async function doConnect(relayUrl: string, sessionToken: string, encryptionKey: 
 
     await channel.connect(sessionToken);
     showStatus('Connected to relay, waiting for host...');
+    if (opts.waitForReadyTimeoutMs) {
+      await channel.waitForReady(opts.waitForReadyTimeoutMs);
+    }
+    return true;
   } catch (err: unknown) {
     connecting = false;
     const failed = channel;
     channel = null;
     try { failed?.close(); } catch { /* ignore */ }
     const message = err instanceof Error ? err.message : 'Unknown error';
-    showError('Connection failed: ' + message);
+    if (opts.suppressFailureUI) {
+      debug(`[viewer] Connection attempt failed: ${message}`);
+      hideError();
+      hideStatus();
+    } else {
+      showError('Connection failed: ' + message);
+    }
+    return false;
   }
 }
 

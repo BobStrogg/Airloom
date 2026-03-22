@@ -53,13 +53,14 @@ Set `RELAY_URL` to switch to a self-hosted WebSocket relay:
 1. Start the relay server:
    ```bash
    pnpm --filter @airloom/relay start
-   # Listens on ws://localhost:4500
+   # Reach it locally at ws://localhost:4500
    ```
 
-2. Start the host (in another terminal):
+2. Start the host (in another terminal) with a relay URL your phone can reach:
    ```bash
-   RELAY_URL=ws://localhost:4500 pnpm --filter @airloom/host dev
+   RELAY_URL=ws://192.168.1.23:4500 pnpm --filter @airloom/host dev
    ```
+   If the host connects to the relay via `localhost`, enter the LAN relay URL in the viewer's optional relay field when pairing by code.
 
 ### Bring your own Ably key
 
