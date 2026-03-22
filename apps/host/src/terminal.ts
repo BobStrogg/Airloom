@@ -303,9 +303,13 @@ export class TerminalSession {
     // Replay is chunked to stay within Ably's 65 KB per-message limit.
     const isFirstViewer = !this.hasHadViewer;
     if (!isFirstViewer && this.outputBuffer) {
-      const CHUNK = 32 * 1024; // 32 KB — leaves headroom for encryption + framing
-      for (let i = 0; i < this.outputBuffer.length; i += CHUNK) {
-        this.stream.write(this.outputBuffer.slice(i, i + CHUNK));
+      const REPLAY_CAP = 64 * 1024;
+      const CHUNK = 32 * 1024;
+      const replay = this.outputBuffer.length <= REPLAY_CAP
+        ? this.outputBuffer
+        : this.outputBuffer.slice(this.outputBuffer.length - REPLAY_CAP);
+      for (let i = 0; i < replay.length; i += CHUNK) {
+        this.stream.write(replay.slice(i, i + CHUNK));
       }
     }
     this.outputBuffer = '';
