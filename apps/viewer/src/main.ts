@@ -349,6 +349,9 @@ disconnectBtn.addEventListener('click', () => {
   }
   if (!saved) {
     debug('[viewer] No saved session found');
+    showStatus('No saved session');
+    await new Promise((r) => setTimeout(r, 1500));
+    hideStatus();
     return;
   }
   debug(`[viewer] Saved session: transport=${saved.transport}, relay=${saved.relay}, session=${saved.session.slice(0, 8)}…, hasToken=${!!saved.token}, tokenExpiresAt=${saved.tokenExpiresAt}`);
@@ -357,6 +360,9 @@ disconnectBtn.addEventListener('click', () => {
     const s = saved as any;
     const reason = !s.token ? 'no token' : s.tokenExpiresAt ? `token expired (${new Date(s.tokenExpiresAt as number).toISOString()})` : 'unknown';
     debug(`[viewer] Saved session not reconnectable: ${reason}`);
+    showStatus(`Session not reconnectable: ${reason}`);
+    await new Promise((r) => setTimeout(r, 2000));
+    hideStatus();
     return;
   }
   showStatus('Reconnecting...');
@@ -543,11 +549,14 @@ async function doConnect(
       terminalScreen.style.display = 'flex';
       setTerminalStatus('Connected');
       ensureTerminal();
-      debug('[viewer] Terminal ensured, calling fitAndSyncTerminal(true)');
-      requestAnimationFrame(() => {
+      // Use setTimeout instead of requestAnimationFrame — on iOS the terminal
+      // screen just switched from display:none to display:flex, and rAF may
+      // fire before the layout reflows, giving the terminal zero dimensions.
+      // A short timeout lets the layout settle so fitAddon gets correct sizes.
+      setTimeout(() => {
         fitAndSyncTerminal(true);
         term?.focus();
-      });
+      }, 100);
     });
     channel.on('peer_left', () => {
       setTerminalStatus('Disconnected', 'status-badge disconnected');
