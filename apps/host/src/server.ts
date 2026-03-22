@@ -442,7 +442,7 @@ const HOST_HTML = `<!DOCTYPE html>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
 <style>
   :root{color-scheme:light dark;--bg:#0a0a0a;--surface:#1a1a1a;--border:#2a2a2a;--text:#e0e0e0;--text-muted:#888;--accent:#7c8aff;--accent-hover:#6b79ee;--input-bg:#111;--input-border:#333;--term-bg:#05070c;--tool-bg:#333;--tool-hover:#444;--msg-user:#2a3a6a;--msg-asst:#1e1e1e}
-  @media(prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#fff;--tool-bg:#e5e5ea;--tool-hover:#d1d1d6;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
+  @media(prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#fff;--tool-bg:#d1d1d6;--tool-hover:#c0c0c5;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
   .container{max-width:800px;margin:0 auto;padding:20px}
@@ -470,7 +470,7 @@ const HOST_HTML = `<!DOCTYPE html>
   .input-area{display:flex;gap:8px}
   .input-area textarea{flex:1;resize:none;min-height:44px;max-height:120px;padding:10px 14px;border-radius:8px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);font-family:inherit;font-size:.9rem}
   .terminal-container{background:var(--term-bg);border:1px solid var(--border);border-radius:8px;height:420px;overflow:hidden;margin-bottom:12px}
-  #terminal{width:100%;height:100%;padding:8px}
+  #terminal{width:100%;height:100%;padding:8px;background:var(--term-bg)}
   .toolbar{display:flex;gap:8px;margin-bottom:12px}
   .tool-btn{padding:6px 12px;font-size:.85rem;background:var(--tool-bg);border:none;border-radius:6px;color:var(--text);cursor:pointer}
   .tool-btn:hover{background:var(--tool-hover)}
