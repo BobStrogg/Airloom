@@ -349,14 +349,18 @@ async function main() {
   }
   if (!useAbly) console.log(`Relay: ${RELAY_URL}`);
 
-  const localUrl = `http://localhost:${port}`;
-  const controlUrl = encodeControlUrl(localUrl, controlToken);
+  // Use LAN IP for control URL when the server is accessible remotely
+  const controlBase = isLoopbackBind(HOST_BIND) ? `http://localhost:${port}` : lanBaseUrl;
+  const controlUrl = encodeControlUrl(controlBase, controlToken);
   console.log(`Host UI:    ${controlUrl}`);
 
   // Auto-open browser unless running over SSH (no display)
-  const isSSH = !!(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT);
-  if (isSSH) {
-    console.log('\n  (SSH session detected — open the Host UI URL above in a local browser)');
+  if (env.isSSH) {
+    if (isLoopbackBind(HOST_BIND)) {
+      console.log('\n  (SSH session detected but server is bound to localhost — set HOST_BIND=0.0.0.0 to allow remote access)');
+    } else {
+      console.log('\n  (SSH session — open the Host UI URL above in a browser on your local machine)');
+    }
   } else {
     import('node:child_process').then(({ exec }) => {
       const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
