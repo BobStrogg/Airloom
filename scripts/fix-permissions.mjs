@@ -8,8 +8,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pnpmDir = join(root, 'node_modules', '.pnpm');
 
 const fixes = [
-  // node-pty: spawn-helper must be executable or posix_spawnp fails
-  { pkg: 'node-pty', glob: 'prebuilds/*/spawn-helper' },
+  // @lydell/node-pty ships platform-specific prebuilt binaries — no spawn-helper
+  // to fix. Keep the array for future native packages that may need it.
 ];
 
 if (!existsSync(pnpmDir)) process.exit(0);

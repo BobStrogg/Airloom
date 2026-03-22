@@ -13,8 +13,8 @@ await esbuild.build({
   outfile: 'dist/index.js',
   banner: { js: '#!/usr/bin/env node' },
   external: [
-    '@noble/hashes', '@xterm/addon-fit', '@xterm/xterm',
-    'ably', 'events', 'express', 'node-pty', 'qrcode', 'tweetnacl', 'ws',
+    '@lydell/node-pty', '@noble/hashes', '@xterm/addon-fit', '@xterm/xterm',
+    'ably', 'events', 'express', 'qrcode', 'tweetnacl', 'ws',
     'node:*', 'fs', 'path', 'os', 'crypto', 'http', 'net', 'stream',
     'child_process', 'util', 'tty', 'process',
   ],

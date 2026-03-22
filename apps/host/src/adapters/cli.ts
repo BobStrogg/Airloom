@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
-import type { IPty } from 'node-pty';
+import type { IPty } from '@lydell/node-pty';
 import type { AIAdapter } from './types.js';
 import type { WriteStream } from '@airloom/channel';
 import { log } from '../log.js';
@@ -172,7 +172,12 @@ export class CLIAdapter implements AIAdapter {
     if (this.pty) return this.pty;
 
     // Lazy-load node-pty so oneshot mode never requires it
-    const nodePty = await import('node-pty');
+    let nodePty: typeof import('@lydell/node-pty');
+    try {
+      nodePty = await import('@lydell/node-pty');
+    } catch (err) {
+      throw new Error(`Failed to load @lydell/node-pty: ${(err as Error).message}`);
+    }
     const executable = resolveExecutable(this.command) ?? this.command;
     log(`[cli-repl] Spawning PTY: ${executable} ${this.args.join(' ')}`);
 
