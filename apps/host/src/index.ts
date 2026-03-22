@@ -351,13 +351,19 @@ async function main() {
 
   const localUrl = `http://localhost:${port}`;
   const controlUrl = encodeControlUrl(localUrl, controlToken);
-  log(`[host] Web UI at ${controlUrl}\n`);
+  console.log(`Host UI:    ${controlUrl}`);
 
-  // Auto-open browser so the phone can scan a proper QR image
-  import('node:child_process').then(({ exec }) => {
-    const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-    exec(`${cmd} ${controlUrl}`);
-  }).catch(() => {});
+  // Auto-open browser unless running over SSH (no display)
+  const isSSH = !!(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT);
+  if (isSSH) {
+    console.log('\n  (SSH session detected — open the Host UI URL above in a local browser)');
+  } else {
+    import('node:child_process').then(({ exec }) => {
+      const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      exec(`${cmd} ${controlUrl}`);
+    }).catch(() => {});
+  }
+  console.log();
 
   const terminal = new TerminalSession(channel, () => state.terminalLaunchCommand, broadcast);
   state.terminal = terminal;
