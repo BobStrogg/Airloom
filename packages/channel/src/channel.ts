@@ -17,6 +17,7 @@ export class Channel extends EventEmitter {
   private role: 'host' | 'viewer';
   private streams = new Map<string, ReadStream>();
   private _ready = false;
+  private _closed = false;
   private msgCounter = 0;
 
   constructor(opts: ChannelOptions) {
@@ -44,8 +45,12 @@ export class Channel extends EventEmitter {
       this.emit('peer_left');
     });
 
-    this.adapter.onError((err) => this.emit('error', err));
-    this.adapter.onDisconnect(() => this.emit('disconnect'));
+    this.adapter.onError((err) => {
+      if (!this._closed) this.emit('error', err);
+    });
+    this.adapter.onDisconnect(() => {
+      if (!this._closed) this.emit('disconnect');
+    });
   }
 
   private handlePayload(base64Payload: string): void {
@@ -134,6 +139,7 @@ export class Channel extends EventEmitter {
   }
 
   close(): void {
+    this._closed = true;
     for (const stream of this.streams.values()) stream._end();
     this.streams.clear();
     this.adapter.close();
