@@ -299,7 +299,8 @@ export class TerminalSession {
     // connect the buffer contains PTY startup junk (zsh PROMPT_SP "%",
     // prompt redraws from host-side resizes) — skip that and rely on the
     // Ctrl-L redraw below for a clean initial screen.
-    if (this.hasHadViewer && this.outputBuffer) {
+    const isFirstViewer = !this.hasHadViewer;
+    if (!isFirstViewer && this.outputBuffer) {
       this.stream.write(this.outputBuffer);
     }
     this.outputBuffer = '';
@@ -310,19 +311,16 @@ export class TerminalSession {
       this.pty.resize(this.cols, this.rows);
     }
 
-    // After a short delay (to let the stream fully establish on the viewer side
-    // via Ably), send Ctrl-L to the PTY.  Ctrl-L is bound to `clear-screen` in
-    // zsh/bash: it clears the terminal and redraws the prompt.  This is more
-    // reliable than SIGWINCH because SIGWINCH output may arrive before the
-    // viewer's ReadStream is ready (the stream_start message hasn't been
-    // processed yet), and the early terminal_resize from the viewer's
-    // ResizeObserver already sets the PTY to the correct size, so a subsequent
-    // SIGWINCH toggle may not produce new output.
-    setTimeout(() => {
-      if (this.pty && this.batcher) {
-        this.pty.write('\x0c');
-      }
-    }, 250);
+    // On first connect only, send Ctrl-L after a short delay to get a clean
+    // prompt.  On reconnection the buffer replay already provides the history
+    // and current prompt — Ctrl-L would destroy that.
+    if (isFirstViewer) {
+      setTimeout(() => {
+        if (this.pty && this.batcher) {
+          this.pty.write('\x0c');
+        }
+      }, 250);
+    }
   }
 
   /** End the current stream without killing the PTY (called on peer disconnect). */
