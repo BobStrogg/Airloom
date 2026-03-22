@@ -100,7 +100,7 @@ if (cliArgs.help) {
 // uses the latest local build instead of the published GitHub Pages version.
 const IS_DEV = !process.env.VIEWER_URL && !new URL(import.meta.url).pathname.includes('node_modules');
 
-const env = parseHostEnv(cliArgs.port);
+const env = parseHostEnv(cliArgs.port, IS_DEV);
 const VIEWER_URL = env.viewerUrl;
 const RELAY_URL = env.relayUrl;
 const ABLY_API_KEY = env.ablyApiKey;
