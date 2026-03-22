@@ -128,7 +128,10 @@ export class AblyAdapter implements RelayAdapter {
 
   send(payload: string): void {
     if (!this.channel || !this._connected) return;
-    this.channel.publish('forward', payload);
+    this.channel.publish('forward', payload).catch((err: Error) => {
+      console.error('[ably] publish error:', err.message);
+      this.errorHandlers.forEach((h) => h(err));
+    });
   }
 
   onMessage(handler: MessageHandler): void {
