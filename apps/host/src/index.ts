@@ -83,7 +83,7 @@ Environment variables:
   ABLY_API_KEY        Your own Ably key (overrides default community relay).
   RELAY_URL           Self-hosted WebSocket relay URL (disables Ably).
   VIEWER_URL          Public viewer URL (default: GitHub Pages).
-  HOST_PORT           Same as --port (CLI flag takes precedence).
+  HOST_PORT           Same as --port (default: 4000, auto-increments if in use).
   HOST_BIND           Host bind address (default: 127.0.0.1).
 `.trimStart());
 }

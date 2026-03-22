@@ -351,17 +351,35 @@ export function createHostServer(opts: {
     }
   }
 
-  return new Promise<{ server: ReturnType<typeof createServer>; broadcast: typeof broadcast; port: number }>((resolve) => {
-    server.listen(opts.port, opts.bind, () => {
-      const addr = server.address();
-      const actualPort = typeof addr === 'object' && addr ? addr.port : opts.port;
-      resolve({ server, broadcast, port: actualPort });
-    });
+  return new Promise<{ server: ReturnType<typeof createServer>; broadcast: typeof broadcast; port: number }>((resolve, reject) => {
+    const MAX_PORT_ATTEMPTS = 20;
+    let attempt = 0;
+    let port = opts.port;
 
-    server.on('error', (err: Error) => {
-      console.error(`[host] Server error: ${err.message}`);
-      process.exit(1);
-    });
+    function tryListen() {
+      server.once('error', onError);
+      server.listen(port, opts.bind, () => {
+        server.removeListener('error', onError);
+        const addr = server.address();
+        const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+        resolve({ server, broadcast, port: actualPort });
+      });
+    }
+
+    function onError(err: NodeJS.ErrnoException) {
+      server.removeListener('error', onError);
+      if (err.code === 'EADDRINUSE' && attempt < MAX_PORT_ATTEMPTS) {
+        attempt++;
+        port++;
+        if (port > 65535) { reject(err); return; }
+        console.log(`[host] Port ${port - 1} in use, trying ${port}...`);
+        tryListen();
+      } else {
+        reject(err);
+      }
+    }
+
+    tryListen();
   });
 }
 
