@@ -96,9 +96,6 @@ document.querySelectorAll('.theme-switch').forEach((sw) => {
   });
 });
 
-// Apply saved theme immediately
-applyTheme();
-
 const connectScreen = document.getElementById('connectScreen')!;
 const terminalScreen = document.getElementById('terminalScreen')!;
 const scanBtn = document.getElementById('scanBtn')!;
@@ -130,6 +127,9 @@ let resizeObserver: ResizeObserver | null = null;
 let terminalReady = false;
 let connecting = false;
 const PEER_READY_TIMEOUT_MS = 8000;
+
+// Apply saved theme now that `term` is declared
+applyTheme();
 const CODE_CONNECT_FAILURE_MESSAGE = 'Could not connect with this code. Scan the QR code once or enter your WebSocket relay URL.';
 
 function saveConnectionParams(_code: string | null, relayUrl: string) {
