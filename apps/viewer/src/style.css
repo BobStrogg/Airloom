@@ -140,6 +140,8 @@ html, body {
   min-height: 0;
   padding: 8px 10px max(10px, env(safe-area-inset-bottom, 0px));
   background: var(--term-bg);
+  overflow: hidden;
+  touch-action: none;
 }
 
 #terminal {

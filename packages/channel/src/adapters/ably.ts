@@ -99,9 +99,20 @@ export class AblyAdapter implements RelayAdapter {
       }
     });
     this.channel.presence.subscribe('leave', (member) => {
-      if (member.clientId !== this.clientId) {
+      if (member.clientId === this.clientId) return;
+      // A stale presence entry (e.g. from a previous viewer session) may expire
+      // AFTER a new viewer has already joined.  Only fire peer_left when no other
+      // peers remain in the presence set, otherwise we'd tear down the stream for
+      // the active viewer.
+      this.channel!.presence.get().then((members) => {
+        const hasPeer = members.some((m) => m.clientId !== this.clientId);
+        if (!hasPeer) {
+          this.peerLeftHandlers.forEach((h) => h());
+        }
+      }).catch(() => {
+        // If presence.get() fails, fall back to the old behaviour
         this.peerLeftHandlers.forEach((h) => h());
-      }
+      });
     });
 
     // Enter presence
