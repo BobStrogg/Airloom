@@ -37,6 +37,27 @@ test('parseHostEnv defaults to localhost-only hosting with the community Ably re
   });
 });
 
+test('parseHostEnv defaults to 0.0.0.0 in dev mode for LAN phone access', () => {
+  withEnv({
+    RELAY_URL: undefined,
+    ABLY_API_KEY: undefined,
+    ABLY_TOKEN_TTL: undefined,
+    HOST_PORT: undefined,
+    HOST_BIND: undefined,
+    VIEWER_URL: undefined,
+  }, () => {
+    const env = parseHostEnv(undefined, true);
+    assert.equal(env.hostBind, '0.0.0.0');
+  });
+});
+
+test('explicit HOST_BIND overrides the dev mode default', () => {
+  withEnv({ HOST_BIND: '127.0.0.1' }, () => {
+    const env = parseHostEnv(undefined, true);
+    assert.equal(env.hostBind, '127.0.0.1');
+  });
+});
+
 test('parseHostEnv respects a self-hosted relay and disables the default Ably key', () => {
   withEnv({
     RELAY_URL: 'wss://relay.example/socket',
