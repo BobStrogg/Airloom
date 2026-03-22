@@ -307,8 +307,29 @@ disconnectBtn.addEventListener('click', () => {
     return;
   }
 
-  const saved = await loadSavedSession();
-  if (!canAutoReconnectSavedSession(saved)) return;
+  debug('[viewer] No hash, checking saved session...');
+  let saved: Awaited<ReturnType<typeof loadSavedSession>>;
+  try {
+    saved = await loadSavedSession();
+  } catch (err) {
+    debug(`[viewer] loadSavedSession error: ${err}`);
+    showStatus(`Session load error: ${err}`);
+    await new Promise((r) => setTimeout(r, 3000));
+    hideStatus();
+    return;
+  }
+  if (!saved) {
+    debug('[viewer] No saved session found');
+    return;
+  }
+  debug(`[viewer] Saved session: transport=${saved.transport}, relay=${saved.relay}, session=${saved.session.slice(0, 8)}…, hasToken=${!!saved.token}, tokenExpiresAt=${saved.tokenExpiresAt}`);
+  if (!canAutoReconnectSavedSession(saved)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TS narrows to never after the type guard
+    const s = saved as any;
+    const reason = !s.token ? 'no token' : s.tokenExpiresAt ? `token expired (${new Date(s.tokenExpiresAt as number).toISOString()})` : 'unknown';
+    debug(`[viewer] Saved session not reconnectable: ${reason}`);
+    return;
+  }
   showStatus('Reconnecting...');
   const keyMaterial = sha256(new TextEncoder().encode('airloom-key:' + saved.session));
   const encryptionKey = deriveEncryptionKey(keyMaterial);
@@ -317,6 +338,7 @@ disconnectBtn.addEventListener('click', () => {
     suppressFailureUI: true,
   });
   if (!reconnected || !channel) {
+    debug('[viewer] Auto-reconnect failed, clearing saved session');
     await clearSavedSession();
     hideError();
     hideStatus();
