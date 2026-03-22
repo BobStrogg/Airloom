@@ -3,17 +3,21 @@ import type { SavedSession } from './pairing.js';
 // Session persistence: stores relay credentials so the viewer can reconnect
 // after a home-screen launch without rescanning the QR code.
 //
-// Strategy: try IndexedDB first (plain JSON, no CryptoKey — Safari standalone
-// web apps have issues round-tripping CryptoKey through structured clone).
-// Fall back to localStorage if IndexedDB is unavailable or errors out.
-// Migrate legacy localStorage entries (airloom:lastSession) on first load.
+// Strategy: write to ALL three stores on save (cookie, IndexedDB, localStorage),
+// read the first hit on load. The cookie is critical because iOS standalone web
+// apps (apple-mobile-web-app-capable) have isolated IndexedDB/localStorage from
+// regular Safari, but cookies ARE shared between the two contexts.
 
 const DB_NAME = 'airloom-session-store';
 const DB_VERSION = 1;
 const STORE_NAME = 'sessions';
 const LAST_SESSION_ID = 'last-session';
 const LS_SESSION_KEY = 'airloom:session';
+const COOKIE_NAME = 'airloom_session';
 const LEGACY_LAST_SESSION_KEY = 'airloom:lastSession';
+// Cookie max-age: 30 days (the Ably token inside expires much sooner, but we
+// check that separately in canAutoReconnectSavedSession).
+const COOKIE_MAX_AGE_S = 30 * 24 * 60 * 60;
 
 function isSavedSession(value: unknown): value is SavedSession {
   if (!value || typeof value !== 'object') return false;
@@ -23,6 +27,34 @@ function isSavedSession(value: unknown): value is SavedSession {
   if (data.token !== undefined && typeof data.token !== 'string') return false;
   if (data.tokenExpiresAt !== undefined && typeof data.tokenExpiresAt !== 'number') return false;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Cookie helpers (bridges Safari ↔ standalone web app storage gap on iOS)
+// ---------------------------------------------------------------------------
+
+function cookieSave(saved: SavedSession): void {
+  try {
+    const json = JSON.stringify(saved);
+    const encoded = encodeURIComponent(json);
+    document.cookie = `${COOKIE_NAME}=${encoded}; path=/; max-age=${COOKIE_MAX_AGE_S}; SameSite=Strict`;
+  } catch { /* best-effort */ }
+}
+
+function cookieLoad(): SavedSession | null {
+  try {
+    const match = document.cookie.split('; ').find((c) => c.startsWith(`${COOKIE_NAME}=`));
+    if (!match) return null;
+    const json = decodeURIComponent(match.slice(COOKIE_NAME.length + 1));
+    const parsed = JSON.parse(json);
+    return isSavedSession(parsed) ? parsed : null;
+  } catch { return null; }
+}
+
+function cookieClear(): void {
+  try {
+    document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; SameSite=Strict`;
+  } catch { /* best-effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,11 +180,14 @@ async function requestPersistentStorage(): Promise<void> {
 }
 
 export async function saveSavedSession(saved: SavedSession): Promise<void> {
-  // Always write to localStorage as the reliable fallback
+  // Cookie first — this is the most reliable bridge between Safari and
+  // standalone web app contexts on iOS.
+  cookieSave(saved);
+  // localStorage as a fast synchronous fallback
   lsSave(saved);
-  // Try IndexedDB as the primary store (more private, survives more contexts)
+  // IndexedDB as the primary structured store
   if (hasIndexedDB()) {
-    try { await idbSave(saved); } catch { /* localStorage already has it */ }
+    try { await idbSave(saved); } catch { /* cookie + localStorage already have it */ }
   }
   clearLegacy();
   deleteOldEncryptedDB();
@@ -166,12 +201,15 @@ export async function loadSavedSession(): Promise<SavedSession | null> {
     await saveSavedSession(legacy);
     return legacy;
   }
-  // Try IndexedDB first
+  // Try cookie first (bridges Safari ↔ standalone web app on iOS)
+  const fromCookie = cookieLoad();
+  if (fromCookie) return fromCookie;
+  // Try IndexedDB
   if (hasIndexedDB()) {
     try {
       const session = await idbLoad();
       if (session) return session;
-    } catch { /* fall through to localStorage */ }
+    } catch { /* fall through */ }
   }
   // Fall back to localStorage
   return lsLoad();
@@ -179,6 +217,7 @@ export async function loadSavedSession(): Promise<SavedSession | null> {
 
 export async function clearSavedSession(): Promise<void> {
   clearLegacy();
+  cookieClear();
   lsClear();
   if (hasIndexedDB()) {
     try { await idbClear(); } catch { /* best-effort */ }
