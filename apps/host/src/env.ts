@@ -4,6 +4,7 @@ const DEFAULT_ABLY_KEY = 'SfHSAQ.IRTOQQ:FBbi9a7ZV6jIu0Gdo_UeYhIN4rzpMrud5-LldURN
 const DEFAULT_VIEWER_URL = 'https://bobstrogg.github.io/Airloom/';
 const DEFAULT_ABLY_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_HOST_BIND = '127.0.0.1';
+const DEFAULT_HOST_PORT = 4000;
 
 export interface HostEnvConfig {
   viewerUrl: string;
@@ -68,7 +69,7 @@ export function parseHostEnv(cliPort?: number, isDev = false): HostEnvConfig {
   const relayUrl = parseRelayUrl(process.env.RELAY_URL);
   const ablyApiKey = process.env.ABLY_API_KEY ?? (relayUrl ? undefined : DEFAULT_ABLY_KEY);
   const ablyTokenTtlMs = parseInteger('ABLY_TOKEN_TTL', process.env.ABLY_TOKEN_TTL, DEFAULT_ABLY_TOKEN_TTL_MS, 60_000, 31 * 24 * 60 * 60 * 1000);
-  const hostPort = cliPort ?? parseInteger('HOST_PORT', process.env.HOST_PORT, 0, 0, 65_535);
+  const hostPort = cliPort ?? parseInteger('HOST_PORT', process.env.HOST_PORT, DEFAULT_HOST_PORT, 0, 65_535);
   const hostBind = parseHostBind(process.env.HOST_BIND, isDev);
   const viewerUrl = parseViewerUrl(process.env.VIEWER_URL);
   return {

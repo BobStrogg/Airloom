@@ -30,7 +30,7 @@ test('parseHostEnv defaults to localhost-only hosting with the community Ably re
   }, () => {
     const env = parseHostEnv();
     assert.equal(env.hostBind, '127.0.0.1');
-    assert.equal(env.hostPort, 0);
+    assert.equal(env.hostPort, 4000);
     assert.equal(env.useAbly, true);
     assert.equal(env.isDefaultAblyKey, true);
     assert.equal(env.viewerUrl, 'https://bobstrogg.github.io/Airloom/');
