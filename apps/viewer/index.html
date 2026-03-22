@@ -50,6 +50,11 @@
         <div id="qrReader" style="display:none"></div>
         <p id="connectError" class="error" style="display:none"></p>
         <p id="connectStatus" class="status-text" style="display:none"></p>
+        <div class="theme-switch" id="connectThemeSwitch">
+          <button data-theme="light">Light</button>
+          <button data-theme="dark">Dark</button>
+          <button data-theme="auto" class="active">Auto</button>
+        </div>
       </div>
     </div>
     <div id="terminalScreen" class="screen" style="display:none">
@@ -65,11 +70,18 @@
           <h2>Airloom</h2>
           <span id="terminalStatus" class="status-badge">Connected</span>
         </div>
-        <button id="disconnectBtn" class="icon-btn" title="Disconnect">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="theme-switch" id="terminalThemeSwitch">
+            <button data-theme="light">Light</button>
+            <button data-theme="dark">Dark</button>
+            <button data-theme="auto" class="active">Auto</button>
+          </div>
+          <button id="disconnectBtn" class="icon-btn" title="Disconnect">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </header>
       <div class="terminal-toolbar">
         <button id="focusTerminalBtn" class="tool-btn">Keyboard</button>
