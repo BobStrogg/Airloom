@@ -299,9 +299,14 @@ export class TerminalSession {
     // connect the buffer contains PTY startup junk (zsh PROMPT_SP "%",
     // prompt redraws from host-side resizes) — skip that and rely on the
     // Ctrl-L redraw below for a clean initial screen.
+    //
+    // Replay is chunked to stay within Ably's 65 KB per-message limit.
     const isFirstViewer = !this.hasHadViewer;
     if (!isFirstViewer && this.outputBuffer) {
-      this.stream.write(this.outputBuffer);
+      const CHUNK = 32 * 1024; // 32 KB — leaves headroom for encryption + framing
+      for (let i = 0; i < this.outputBuffer.length; i += CHUNK) {
+        this.stream.write(this.outputBuffer.slice(i, i + CHUNK));
+      }
     }
     this.outputBuffer = '';
     this.hasHadViewer = true;
