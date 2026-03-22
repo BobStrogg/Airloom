@@ -1,7 +1,7 @@
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import { chmodSync, existsSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { type IPty, spawn } from 'node-pty';
+import type { IPty } from '@lydell/node-pty';
 import type { Channel, WriteStream } from '@airloom/channel';
 import type {
   TerminalCloseMessage,
@@ -14,31 +14,25 @@ import type {
 } from '@airloom/protocol';
 import { log, logError } from './log.js';
 
-/**
- * node-pty ships a native `spawn-helper` binary in prebuilds/.
- * npm/npx often strips the execute bit from files in tarballs, which causes
- * posix_spawnp to fail at runtime. This function detects and fixes the
- * permission before we attempt to spawn a PTY.
- */
-function fixSpawnHelperPermissions(): void {
+// ---------------------------------------------------------------------------
+// Lazy-load @lydell/node-pty — ships platform-specific prebuilt binaries so
+// no C++ compiler is needed at install time.
+// ---------------------------------------------------------------------------
+let _nodePty: typeof import('@lydell/node-pty') | null = null;
+let _nodePtyError: string | null = null;
+
+function requireNodePty(): typeof import('@lydell/node-pty') {
+  if (_nodePty) return _nodePty;
+  if (_nodePtyError) throw new Error(_nodePtyError);
   try {
     const require_ = createRequire(import.meta.url);
-    const ptyDir = dirname(require_.resolve('node-pty/package.json'));
-    const helperPath = join(ptyDir, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper');
-    if (!existsSync(helperPath)) return;
-    const mode = statSync(helperPath).mode;
-    if (!(mode & 0o111)) {
-      chmodSync(helperPath, mode | 0o755);
-      log(`[host] Fixed spawn-helper permissions: ${helperPath}`);
-    }
-  } catch {
-    // Non-fatal: if we can't fix permissions, the spawn will fail and we'll
-    // see the existing error handling / fallback logic.
+    _nodePty = require_('@lydell/node-pty') as typeof import('@lydell/node-pty');
+    return _nodePty;
+  } catch (err) {
+    _nodePtyError = `Failed to load @lydell/node-pty: ${(err as Error).message}`;
+    throw new Error(_nodePtyError);
   }
 }
-
-// Fix permissions once at module load, before any PTY spawn attempt
-fixSpawnHelperPermissions();
 
 /**
  * Strip auto-generated terminal query responses that leak from xterm.js.
@@ -219,8 +213,15 @@ export class TerminalSession {
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
     const spawnOpts = { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd, env };
+    let nodePty: ReturnType<typeof requireNodePty>;
     try {
-      this.pty = spawn(file, command.args, spawnOpts);
+      nodePty = requireNodePty();
+    } catch (err) {
+      logError(`[host] ${(err as Error).message}`);
+      return;
+    }
+    try {
+      this.pty = nodePty.spawn(file, command.args, spawnOpts);
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
       logError(`[host] PTY spawn failed: ${e.message} (code=${e.code ?? 'none'}) file=${file} cwd=${cwd}`);
@@ -228,7 +229,7 @@ export class TerminalSession {
       if (file !== '/bin/sh') {
         logError('[host] Retrying with /bin/sh...');
         try {
-          this.pty = spawn('/bin/sh', [], spawnOpts);
+          this.pty = nodePty.spawn('/bin/sh', [], spawnOpts);
           log('[host] PTY fallback to /bin/sh succeeded');
         } catch (err2) {
           logError('[host] PTY fallback also failed:', (err2 as Error).message);
