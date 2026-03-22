@@ -189,6 +189,11 @@ export function getTerminalLaunchDisplay(explicitCommand?: string): string {
 }
 
 const MAX_BUFFER_BYTES = 512 * 1024; // 512 KB scrollback
+// When replaying output to a newly-connected viewer, only send the tail of the
+// buffer. A full 512 KB replay floods the viewer with ancient history (including
+// zsh's initial PROMPT_SP "%" marker and hundreds of old prompts). 16 KB is
+// roughly 4–5 screens and is enough to reconstruct the current terminal state.
+const MAX_REPLAY_BYTES = 16 * 1024;
 
 export class TerminalSession {
   private pty: IPty | null = null;
@@ -287,9 +292,12 @@ export class TerminalSession {
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
     this.batcher = new AdaptiveOutputBatcher((data) => { this.stream?.write(data); });
 
-    // Replay scrollback so the viewer sees existing terminal content immediately
+    // Replay recent scrollback so the viewer sees the current terminal state
     if (this.outputBuffer) {
-      this.stream.write(this.outputBuffer);
+      const replay = this.outputBuffer.length <= MAX_REPLAY_BYTES
+        ? this.outputBuffer
+        : this.outputBuffer.slice(this.outputBuffer.length - MAX_REPLAY_BYTES);
+      this.stream.write(replay);
     }
 
     // If PTY exited since last connection, restart it

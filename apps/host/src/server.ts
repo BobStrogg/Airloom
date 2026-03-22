@@ -571,6 +571,10 @@ function initTerminal() {
       ws.send(JSON.stringify({ type: 'terminal_resize', cols: term.cols, rows: term.rows }));
     }
   }).observe(document.getElementById('terminalContainer'));
+  // Prevent wheel events from leaking to the page when the terminal is at its
+  // scroll bounds. xterm.js v6 uses a SmoothScrollableElement that doesn't
+  // always consume wheel events at the extents.
+  document.getElementById('terminalContainer').addEventListener('wheel', (e) => { e.preventDefault(); }, { passive: false });
   if (ws.readyState === WebSocket.OPEN) sendTerminalOpen();
 }
 
