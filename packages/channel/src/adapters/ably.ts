@@ -155,6 +155,14 @@ export class AblyAdapter implements RelayAdapter {
   }
 
   close(): void {
+    // Clear handlers first so in-flight publish errors are silently dropped
+    // during shutdown instead of emitting to an already-closed Channel.
+    this.messageHandlers = [];
+    this.peerJoinedHandlers = [];
+    this.peerLeftHandlers = [];
+    this.errorHandlers = [];
+    this.disconnectHandlers = [];
+
     // presence.leave() and detach() return promises that may reject if already
     // disconnected — swallow those rejections so shutdown is always clean.
     this.channel?.presence.leave().catch(() => {});
