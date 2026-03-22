@@ -43,6 +43,62 @@ if ('serviceWorker' in navigator) {
   caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
 }
 
+const THEME_KEY = 'airloom-theme';
+
+type ThemePref = 'light' | 'dark' | 'auto';
+
+function getSavedTheme(): ThemePref {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === 'light' || v === 'dark') return v;
+  } catch {}
+  return 'auto';
+}
+
+function resolveTheme(pref: ThemePref): 'light' | 'dark' {
+  if (pref !== 'auto') return pref;
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function applyTheme(pref?: ThemePref) {
+  const chosen = pref ?? getSavedTheme();
+  const effective = resolveTheme(chosen);
+  const root = document.documentElement;
+
+  // Set data-theme only for explicit light/dark; remove for auto (let media query work)
+  if (chosen === 'auto') {
+    root.removeAttribute('data-theme');
+  } else {
+    root.setAttribute('data-theme', chosen);
+  }
+
+  // Update meta theme-color for iOS status bar
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', effective === 'light' ? '#f5f5f7' : '#0a0a0a');
+
+  // Update xterm theme if terminal is open
+  if (term) term.options.theme = effective === 'light' ? lightTermTheme : darkTermTheme;
+
+  // Sync active class on all theme switch buttons
+  document.querySelectorAll('.theme-switch button').forEach((btn) => {
+    btn.classList.toggle('active', (btn as HTMLElement).dataset.theme === chosen);
+  });
+
+  try { localStorage.setItem(THEME_KEY, chosen); } catch {}
+}
+
+// Wire up theme switch clicks (both connect & terminal screen)
+document.querySelectorAll('.theme-switch').forEach((sw) => {
+  sw.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('button[data-theme]') as HTMLElement | null;
+    if (!btn) return;
+    applyTheme(btn.dataset.theme as ThemePref);
+  });
+});
+
+// Apply saved theme immediately
+applyTheme();
+
 const connectScreen = document.getElementById('connectScreen')!;
 const terminalScreen = document.getElementById('terminalScreen')!;
 const scanBtn = document.getElementById('scanBtn')!;
@@ -151,7 +207,7 @@ const lightTermTheme = {
 };
 
 function getTermTheme() {
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? lightTermTheme : darkTermTheme;
+  return resolveTheme(getSavedTheme()) === 'light' ? lightTermTheme : darkTermTheme;
 }
 
 function ensureTerminal() {
@@ -217,9 +273,9 @@ function ensureTerminal() {
   resizeObserver.observe(terminalContainer);
 }
 
-// Live-switch the xterm theme when the system color scheme changes
+// Re-apply theme when system color scheme changes (matters when set to 'auto')
 window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-  if (term) term.options.theme = getTermTheme();
+  if (getSavedTheme() === 'auto') applyTheme('auto');
 });
 
 let lastSentCols = 0;
