@@ -12,6 +12,7 @@ import type {
   TerminalResizeMessage,
   TerminalStreamMeta,
 } from '@airloom/protocol';
+import { log, logError } from './log.js';
 
 /**
  * node-pty ships a native `spawn-helper` binary in prebuilds/.
@@ -28,7 +29,7 @@ function fixSpawnHelperPermissions(): void {
     const mode = statSync(helperPath).mode;
     if (!(mode & 0o111)) {
       chmodSync(helperPath, mode | 0o755);
-      console.log(`[host] Fixed spawn-helper permissions: ${helperPath}`);
+      log(`[host] Fixed spawn-helper permissions: ${helperPath}`);
     }
   } catch {
     // Non-fatal: if we can't fix permissions, the spawn will fail and we'll
@@ -214,7 +215,7 @@ export class TerminalSession {
     const command = getDefaultTerminalCommand(this.getLaunchCommand?.());
     const file = resolveExecutable(command.file) ?? command.file;
     const cwd = process.cwd();
-    console.log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows}) node=${process.version}`);
+    log(`[host] PTY spawn: ${file} ${command.args.join(' ')} (${this.cols}x${this.rows}) node=${process.version}`);
 
     const env = { ...process.env as Record<string, string>, TERM: 'xterm-256color' };
     const spawnOpts = { name: 'xterm-256color', cols: this.cols, rows: this.rows, cwd, env };
@@ -222,15 +223,15 @@ export class TerminalSession {
       this.pty = spawn(file, command.args, spawnOpts);
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      console.error(`[host] PTY spawn failed: ${e.message} (code=${e.code ?? 'none'}) file=${file} cwd=${cwd}`);
+      logError(`[host] PTY spawn failed: ${e.message} (code=${e.code ?? 'none'}) file=${file} cwd=${cwd}`);
       // Fallback: try /bin/sh with no flags if the preferred shell failed
       if (file !== '/bin/sh') {
-        console.error('[host] Retrying with /bin/sh...');
+        logError('[host] Retrying with /bin/sh...');
         try {
           this.pty = spawn('/bin/sh', [], spawnOpts);
-          console.log('[host] PTY fallback to /bin/sh succeeded');
+          log('[host] PTY fallback to /bin/sh succeeded');
         } catch (err2) {
-          console.error('[host] PTY fallback also failed:', (err2 as Error).message);
+          logError('[host] PTY fallback also failed:', (err2 as Error).message);
           return;
         }
       } else {

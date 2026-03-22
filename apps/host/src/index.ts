@@ -18,6 +18,7 @@ import { TerminalSession, getTerminalLaunchDisplay, isTerminalMessage } from './
 import { parseHostEnv, isLoopbackBind } from './env.js';
 import { loadOrCreateAblySessionToken } from './state.js';
 import { createControlToken, encodeControlUrl } from './security.js';
+import { log, logError } from './log.js';
 
 // Lazy import qrcode to avoid tsx ETIMEDOUT issues on macOS
 let QRCode: typeof import('qrcode') | null = null;
@@ -26,7 +27,7 @@ async function getQRCode() {
   return QRCode;
 }
 
-console.log('[host] Module loaded');
+log('[host] Module loaded');
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing (lightweight, no dependencies)
@@ -139,13 +140,13 @@ async function main() {
 
   if (useAbly) {
     if (isDefaultKey) {
-      console.log('Transport: Ably (community relay — shared quota)');
-      console.log('  Set ABLY_API_KEY for your own quota, or RELAY_URL for self-hosted.\n');
+      log('Transport: Ably (community relay — shared quota)');
+      log('  Set ABLY_API_KEY for your own quota, or RELAY_URL for self-hosted.\n');
     } else {
-      console.log('Transport: Ably (your key)');
+      log('Transport: Ably (your key)');
     }
   } else {
-    console.log(`Transport: WebSocket (self-hosted relay at ${RELAY_URL})`);
+    log(`Transport: WebSocket (self-hosted relay at ${RELAY_URL})`);
   }
 
   let pairingCode: string;
@@ -170,7 +171,7 @@ async function main() {
       capability: { [channelName]: ['publish', 'subscribe', 'presence'] },
       ttl: ABLY_TOKEN_TTL,
     });
-    console.log(`[ably] Scoped token issued (TTL: ${Math.round(ABLY_TOKEN_TTL / 60000)}min, channel: ${channelName})`);
+    log(`[ably] Scoped token issued (TTL: ${Math.round(ABLY_TOKEN_TTL / 60000)}min, channel: ${channelName})`);
 
     ablyToken = tokenDetails.token;
     ablyTokenExpiresAt = tokenDetails.expires;
@@ -210,12 +211,12 @@ async function main() {
   });
 
   await channel.connect(relaySessionToken);
-  console.log('[host] Connected to relay, waiting for phone...');
+  log('[host] Connected to relay, waiting for phone...');
 
   const savedConfig = loadConfig();
   const launchPreset = cliArgs.preset ? CLI_PRESETS.find((p) => p.id === cliArgs.preset) : undefined;
   if (cliArgs.preset && !launchPreset) {
-    console.error(`[host] Unknown preset "${cliArgs.preset}". Available: ${CLI_PRESETS.map((p) => p.id).join(', ')}`);
+    logError(`[host] Unknown preset "${cliArgs.preset}". Available: ${CLI_PRESETS.map((p) => p.id).join(', ')}`);
     process.exit(1);
   }
   const savedTerminalCommand = (!cliArgs.cli && !cliArgs.preset && savedConfig?.type === 'terminal')
@@ -243,7 +244,7 @@ async function main() {
     transport: useAbly ? 'ably' : 'ws',
   };
 
-  console.log(`[host] Terminal launch: ${terminalLaunch}`);
+  log(`[host] Terminal launch: ${terminalLaunch}`);
 
   // Configure adapter: CLI args take precedence, then saved config, then env vars.
   if (cliArgs.cli || cliArgs.preset) {
@@ -257,7 +258,7 @@ async function main() {
         mode: presetInfo?.mode,
         silenceTimeout: presetInfo?.silenceTimeout,
       });
-      console.log(`[host] CLI adapter: ${command} (${presetInfo?.mode ?? 'oneshot'})`);
+      log(`[host] CLI adapter: ${command} (${presetInfo?.mode ?? 'oneshot'})`);
     }
   } else {
     // Fall back to saved config file
@@ -289,11 +290,11 @@ async function main() {
           }
         }
         if (state.adapter) {
-          console.log(`[host] Auto-configured: ${state.adapter.name} (${state.adapter.model})`);
-          console.log(`  Loaded from ${getConfigPath()}`);
+          log(`[host] Auto-configured: ${state.adapter.name} (${state.adapter.model})`);
+          log(`  Loaded from ${getConfigPath()}`);
         }
       } catch (err) {
-        console.error('[host] Auto-configure failed:', (err as Error).message);
+        logError('[host] Auto-configure failed:', (err as Error).message);
       }
     }
   }
@@ -301,9 +302,9 @@ async function main() {
   // Resolve viewer dist directory and start server
   const viewerDir = resolveViewerDir();
   if (viewerDir) {
-    console.log(`[host] Viewer files: ${viewerDir}`);
+    log(`[host] Viewer files: ${viewerDir}`);
   } else {
-    console.log('[host] Viewer dist not found — QR will open raw JSON fallback');
+    log('[host] Viewer dist not found — QR will open raw JSON fallback');
   }
 
   const controlToken = createControlToken();
@@ -350,7 +351,7 @@ async function main() {
 
   const localUrl = `http://localhost:${port}`;
   const controlUrl = encodeControlUrl(localUrl, controlToken);
-  console.log(`[host] Web UI at ${controlUrl}\n`);
+  log(`[host] Web UI at ${controlUrl}\n`);
 
   // Auto-open browser so the phone can scan a proper QR image
   import('node:child_process').then(({ exec }) => {
@@ -375,14 +376,14 @@ async function main() {
 
   // Channel events
   channel.on('ready', () => {
-    console.log('[host] Phone connected! Channel ready.');
+    log('[host] Phone connected! Channel ready.');
     state.connected = true;
     broadcast({ type: 'peer_connected' });
     pushViewerSession();
   });
 
   channel.on('peer_left', () => {
-    console.log('[host] Phone disconnected.');
+    log('[host] Phone disconnected.');
     state.connected = false;
     terminal.detachStream();
     broadcast({ type: 'peer_disconnected' });
@@ -391,14 +392,14 @@ async function main() {
   // Messages from the phone (viewer)
   channel.on('message', (data: unknown) => {
     if (isTerminalMessage(data)) {
-      console.log('[host] Terminal message from phone:', (data as {type: string}).type);
+      log('[host] Terminal message from phone:', (data as {type: string}).type);
       terminal.handleMessage(data);
       return;
     }
     if (typeof data === 'object' && data !== null && 'type' in data && 'content' in data) {
       const msg = data as Record<string, unknown>;
       if (msg.type === 'chat' && typeof msg.content === 'string') {
-        console.log(`[phone] ${msg.content}`);
+        log(`[phone] ${msg.content}`);
         state.messages.push({ role: 'user', content: msg.content, timestamp: Date.now() });
         broadcast({ type: 'message', role: 'user', content: msg.content });
 
@@ -409,14 +410,14 @@ async function main() {
     }
   });
 
-  channel.on('error', (err: Error) => console.error('[host] Channel error:', err.message));
+  channel.on('error', (err: Error) => logError('[host] Channel error:', err.message));
 
   // Graceful shutdown
   let shuttingDown = false;
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log('\n[host] Shutting down...');
+    log('\n[host] Shutting down...');
     terminal.destroy();
     state.adapter?.destroy?.();
     try { channel.close(); } catch { /* Ably may throw if already detached */ }
@@ -429,6 +430,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err);
+  logError('Fatal error:', err);
   process.exit(1);
 });

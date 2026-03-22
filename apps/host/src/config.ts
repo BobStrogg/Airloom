@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { logError } from './log.js';
 
 const CONFIG_DIR = join(homedir(), '.config', 'airloom');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
@@ -31,7 +32,7 @@ export function saveConfig(config: SavedConfig): void {
     mkdirSync(CONFIG_DIR, { recursive: true });
     writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
   } catch (err) {
-    console.error('[config] Failed to save:', (err as Error).message);
+    logError('[config] Failed to save:', (err as Error).message);
   }
 }
 

@@ -4,6 +4,7 @@ import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import type { IPty } from 'node-pty';
 import type { AIAdapter } from './types.js';
 import type { WriteStream } from '@airloom/channel';
+import { log } from '../log.js';
 
 export interface CLIPreset {
   id: string;
@@ -173,7 +174,7 @@ export class CLIAdapter implements AIAdapter {
     // Lazy-load node-pty so oneshot mode never requires it
     const nodePty = await import('node-pty');
     const executable = resolveExecutable(this.command) ?? this.command;
-    console.log(`[cli-repl] Spawning PTY: ${executable} ${this.args.join(' ')}`);
+    log(`[cli-repl] Spawning PTY: ${executable} ${this.args.join(' ')}`);
 
     const pty = nodePty.spawn(executable, this.args, {
       name: 'xterm-256color',
@@ -185,7 +186,7 @@ export class CLIAdapter implements AIAdapter {
 
     pty.onData((data) => this.onData(data));
     pty.onExit(({ exitCode }) => {
-      console.log(`[cli-repl] PTY exited (code ${exitCode})`);
+      log(`[cli-repl] PTY exited (code ${exitCode})`);
       this.pty = null;
       this.ptyState = 'idle';
       this.finishResponse();
