@@ -13,6 +13,7 @@ import { loadConfig, saveConfig } from './config.js';
 import { getTerminalLaunchDisplay } from './terminal.js';
 import type { SavedConfig } from './config.js';
 import { CONTROL_COOKIE_NAME, FixedWindowRateLimiter, hasAllowedOrigin, hasValidControlToken, readControlToken } from './security.js';
+import { log, logError } from './log.js';
 
 export interface ServerState {
   channel: Channel | null;
@@ -48,7 +49,7 @@ export function enqueueAIResponse(
 ): void {
   aiLock = aiLock
     .then(() => handleAIResponse(channel, adapter, state, broadcast))
-    .catch((err) => console.error('[host] AI response error:', err));
+    .catch((err) => logError('[host] AI response error:', err));
 }
 
 export function createHostServer(opts: {
@@ -339,7 +340,7 @@ export function createHostServer(opts: {
           opts.state.terminal?.handleMessage(message);
         }
       } catch (err) {
-        console.error('[host] Invalid WebSocket message:', err);
+        logError('[host] Invalid WebSocket message:', err);
       }
     });
   });
@@ -372,7 +373,7 @@ export function createHostServer(opts: {
         attempt++;
         port++;
         if (port > 65535) { reject(err); return; }
-        console.log(`[host] Port ${port - 1} in use, trying ${port}...`);
+        log(`[host] Port ${port - 1} in use, trying ${port}...`);
         tryListen();
       } else {
         reject(err);
