@@ -98,7 +98,8 @@ function resolveExecutable(command: string, envPath = process.env.PATH ?? ''): s
   }
   for (const dir of envPath.split(delimiter)) {
     if (!dir) continue;
-    const candidate = join(dir.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'), command);
+    const home = process.env.HOME || process.env.USERPROFILE || '~';
+    const candidate = join(dir.replace(/^~(?=$|\/)/, home), command);
     if (existsSync(candidate)) return candidate;
   }
   return null;
@@ -115,14 +116,17 @@ function parseCommand(command: string): { file: string; args: string[] } {
 function getDefaultTerminalCommand(explicitCommand?: string): { file: string; args: string[] } {
   const configured = explicitCommand?.trim() || process.env.AIRLOOM_TERMINAL_COMMAND?.trim();
   if (configured) return parseCommand(configured);
-  if (process.platform === 'win32') {
-    const file = process.env.COMSPEC || 'powershell.exe';
-    return { file, args: [] };
+  // Prefer $SHELL when set (works in Git Bash on Windows too)
+  const shell = process.env.SHELL;
+  if (shell) {
+    const name = basename(shell);
+    if (name === 'bash' || name === 'zsh' || name === 'sh') return { file: shell, args: ['-il'] };
+    return { file: shell, args: ['-i'] };
   }
-  const shell = process.env.SHELL || '/bin/bash';
-  const name = basename(shell);
-  if (name === 'bash' || name === 'zsh' || name === 'sh') return { file: shell, args: ['-il'] };
-  return { file: shell, args: ['-i'] };
+  if (process.platform === 'win32') {
+    return { file: process.env.COMSPEC || 'powershell.exe', args: [] };
+  }
+  return { file: '/bin/bash', args: ['-il'] };
 }
 
 class AdaptiveOutputBatcher {

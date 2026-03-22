@@ -18,6 +18,7 @@ import { TerminalSession, getTerminalLaunchDisplay, isTerminalMessage } from './
 import { parseHostEnv, isLoopbackBind } from './env.js';
 import { loadOrCreateAblySessionToken } from './state.js';
 import { createControlToken, encodeControlUrl } from './security.js';
+import { handleStart, handleStop, handleList } from './daemon.js';
 import { log, logError } from './log.js';
 
 // Lazy import qrcode to avoid tsx ETIMEDOUT issues on macOS
@@ -26,8 +27,6 @@ async function getQRCode() {
   if (!QRCode) QRCode = await import('qrcode');
   return QRCode;
 }
-
-log('[host] Module loaded');
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing (lightweight, no dependencies)
@@ -63,7 +62,15 @@ function printHelp() {
 Airloom — Run AI on your computer, control it from your phone.
 
 Usage:
-  airloom [options]
+  airloom [options]            Start in foreground (default)
+  airloom start [options]      Start as a background daemon
+  airloom stop [name]          Stop a background session
+  airloom stop --all           Stop all background sessions
+  airloom list                 List running background sessions
+
+Background options:
+  --name <name>     Session name (default: "default").
+                    Allows multiple independent sessions.
 
 Options:
   --cli <command>     CLI command to use as the AI adapter.
@@ -89,30 +96,6 @@ Environment variables:
 `.trimStart());
 }
 
-const cliArgs = parseArgs(process.argv);
-
-if (cliArgs.help) {
-  printHelp();
-  process.exit(0);
-}
-
-// Dev mode: running from local repo (not from npm/node_modules).
-// When true, the QR code points to the locally-served LAN viewer so the phone
-// uses the latest local build instead of the published GitHub Pages version.
-const IS_DEV = !process.env.VIEWER_URL && !new URL(import.meta.url).pathname.includes('node_modules');
-
-const env = parseHostEnv(cliArgs.port, IS_DEV);
-const VIEWER_URL = env.viewerUrl;
-const RELAY_URL = env.relayUrl;
-const ABLY_API_KEY = env.ablyApiKey;
-const ABLY_TOKEN_TTL = env.ablyTokenTtlMs;
-const HOST_PORT = env.hostPort;
-const HOST_BIND = env.hostBind;
-const useAbly = env.useAbly;
-const isDefaultKey = env.isDefaultAblyKey;
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 /** Find the first non-internal IPv4 LAN address. */
 function getLanIP(): string | undefined {
   for (const ifaces of Object.values(networkInterfaces())) {
@@ -124,17 +107,41 @@ function getLanIP(): string | undefined {
 }
 
 /** Resolve the viewer dist directory (works in both dev and prod layout). */
-function resolveViewerDir(): string | undefined {
+function resolveViewerDir(base: string): string | undefined {
   // Prod: dist/viewer/ alongside the bundled index.js
-  const prod = resolve(__dirname, 'viewer');
+  const prod = resolve(base, 'viewer');
   if (existsSync(prod)) return prod;
   // Dev (tsx): src/ → ../../viewer/dist
-  const dev = resolve(__dirname, '../../viewer/dist');
+  const dev = resolve(base, '../../viewer/dist');
   if (existsSync(dev)) return dev;
   return undefined;
 }
 
 async function main() {
+  const cliArgs = parseArgs(process.argv);
+
+  if (cliArgs.help) {
+    printHelp();
+    process.exit(0);
+  }
+
+  // Dev mode: running from local repo (not from npm/node_modules).
+  // When true, the QR code points to the locally-served LAN viewer so the phone
+  // uses the latest local build instead of the published GitHub Pages version.
+  const IS_DEV = !process.env.VIEWER_URL && !new URL(import.meta.url).pathname.includes('node_modules');
+
+  const env = parseHostEnv(cliArgs.port, IS_DEV);
+  const VIEWER_URL = env.viewerUrl;
+  const RELAY_URL = env.relayUrl;
+  const ABLY_API_KEY = env.ablyApiKey;
+  const ABLY_TOKEN_TTL = env.ablyTokenTtlMs;
+  const HOST_PORT = env.hostPort;
+  const HOST_BIND = env.hostBind;
+  const useAbly = env.useAbly;
+  const isDefaultKey = env.isDefaultAblyKey;
+  const isDaemonChild = process.argv.includes('--_daemon');
+
+  const __dirname = dirname(fileURLToPath(import.meta.url));
   console.log('Airloom - Host');
   console.log('==============\n');
 
@@ -300,7 +307,7 @@ async function main() {
   }
 
   // Resolve viewer dist directory and start server
-  const viewerDir = resolveViewerDir();
+  const viewerDir = resolveViewerDir(__dirname);
   if (viewerDir) {
     log(`[host] Viewer files: ${viewerDir}`);
   } else {
@@ -354,17 +361,24 @@ async function main() {
   const controlUrl = encodeControlUrl(controlBase, controlToken);
   console.log(`Host UI:    ${controlUrl}`);
 
-  // Auto-open browser unless running over SSH (no display)
-  if (env.isSSH) {
+  // Notify daemon parent that we're ready (IPC message)
+  if (isDaemonChild && typeof process.send === 'function') {
+    process.send({ type: 'ready', port, controlUrl, viewerUrl: qrTarget, pairingCode: displayCode });
+  }
+
+  // Auto-open browser unless running as daemon child or over SSH
+  if (isDaemonChild) {
+    // Daemon child — parent displays output to user
+  } else if (env.isSSH) {
     if (isLoopbackBind(HOST_BIND)) {
       console.log('\n  (SSH session detected but server is bound to localhost — set HOST_BIND=0.0.0.0 to allow remote access)');
     } else {
       console.log('\n  (SSH session — open the Host UI URL above in a browser on your local machine)');
     }
   } else {
-    import('node:child_process').then(({ exec }) => {
+    import('node:child_process').then(({ execFile }) => {
       const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-      exec(`${cmd} ${controlUrl}`);
+      execFile(cmd, [controlUrl]);
     }).catch(() => {});
   }
   console.log();
@@ -439,7 +453,48 @@ async function main() {
   process.on('SIGTERM', shutdown);
 }
 
-main().catch((err) => {
-  logError('Fatal error:', err);
-  process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// Entry point — dispatch subcommands or run in foreground
+// ---------------------------------------------------------------------------
+const _cmd = process.argv[2];
+
+if (_cmd === 'start' || _cmd === 'stop' || _cmd === 'list') {
+  (async () => {
+    const _args = process.argv.slice(3);
+
+    if (_cmd === 'list') {
+      handleList();
+      return;
+    }
+
+    if (_cmd === 'stop') {
+      let stopName: string | null = null;
+      let stopAll = false;
+      for (const a of _args) {
+        if (a === '--all') stopAll = true;
+        else if (!a.startsWith('-')) stopName = a;
+      }
+      handleStop(stopName, stopAll);
+      return;
+    }
+
+    // start — parse --name, forward remaining args to child
+    let startName = 'default';
+    const hostArgs: string[] = [];
+    for (let i = 0; i < _args.length; i++) {
+      const a = _args[i];
+      if (a === '--name' && i + 1 < _args.length) { startName = _args[++i]; }
+      else if (a.startsWith('--name=')) { startName = a.slice(7); }
+      else { hostArgs.push(a); }
+    }
+    await handleStart(startName, hostArgs);
+  })().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
+} else {
+  main().catch((err) => {
+    logError('Fatal error:', err);
+    process.exit(1);
+  });
+}

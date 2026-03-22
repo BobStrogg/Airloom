@@ -27,15 +27,29 @@ export class AnthropicAdapter implements AIAdapter {
     };
     if (systemMsg) body.system = systemMsg;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      const msg = (err as Error).name === 'AbortError' ? 'Request timed out' : (err as Error).message;
+      stream.write(`[Error: ${msg}]`);
+      stream.end();
+      return;
+    }
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const error = await response.text();

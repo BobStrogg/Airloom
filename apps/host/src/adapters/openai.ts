@@ -18,14 +18,28 @@ export class OpenAIAdapter implements AIAdapter {
     messages: Array<{ role: string; content: string }>,
     stream: WriteStream,
   ): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({ model: this.model, stream: true, messages }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({ model: this.model, stream: true, messages }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      const msg = (err as Error).name === 'AbortError' ? 'Request timed out' : (err as Error).message;
+      stream.write(`[Error: ${msg}]`);
+      stream.end();
+      return;
+    }
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const error = await response.text();
