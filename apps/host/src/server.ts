@@ -441,14 +441,19 @@ const HOST_HTML = `<!DOCTYPE html>
 <title>Airloom - Host</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
 <style>
-  :root{color-scheme:light dark;--bg:#0a0a0a;--surface:#1a1a1a;--border:#2a2a2a;--text:#e0e0e0;--text-muted:#888;--accent:#7c8aff;--accent-hover:#6b79ee;--input-bg:#111;--input-border:#333;--term-bg:#05070c;--tool-bg:#333;--tool-hover:#444;--msg-user:#2a3a6a;--msg-asst:#1e1e1e}
-  @media(prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#fff;--tool-bg:#d1d1d6;--tool-hover:#c0c0c5;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
+  :root{color-scheme:dark;--bg:#0a0a0a;--surface:#1a1a1a;--border:#2a2a2a;--text:#e0e0e0;--text-muted:#888;--accent:#7c8aff;--accent-hover:#6b79ee;--input-bg:#111;--input-border:#333;--term-bg:#05070c;--tool-bg:#333;--tool-hover:#444;--msg-user:#2a3a6a;--msg-asst:#1e1e1e}
+  [data-theme="light"]{color-scheme:light;--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#fff;--tool-bg:#d1d1d6;--tool-hover:#c0c0c5;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}
+  @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){color-scheme:light;--bg:#f5f5f7;--surface:#fff;--border:#d1d1d6;--text:#1c1c1e;--text-muted:#6e6e73;--accent:#5856d6;--accent-hover:#4a48c4;--input-bg:#fff;--input-border:#d1d1d6;--term-bg:#fff;--tool-bg:#d1d1d6;--tool-hover:#c0c0c5;--msg-user:#d6d5f7;--msg-asst:#f2f2f7}}
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
   .container{max-width:800px;margin:0 auto;padding:20px}
   .page-header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
   .page-header svg{width:36px;height:36px;flex-shrink:0}
-  .page-header h1{font-size:1.5rem;color:var(--accent)}
+  .page-header h1{font-size:1.5rem;color:var(--accent);flex:1}
+  .theme-switch{display:flex;gap:2px;background:var(--border);border-radius:8px;padding:2px}
+  .theme-btn{padding:5px 10px;font-size:.8rem;background:transparent;border:none;border-radius:6px;color:var(--text-muted);cursor:pointer;font-weight:500;line-height:1}
+  .theme-btn:hover{color:var(--text)}
+  .theme-btn.active{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.15)}
   h2{font-size:1.1rem;margin-bottom:12px;color:var(--text-muted)}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
   .status{display:flex;align-items:center;gap:8px;margin-bottom:8px}
@@ -481,6 +486,11 @@ const HOST_HTML = `<!DOCTYPE html>
   <div class="page-header">
     <svg viewBox="0 0 100 100" fill="none"><defs><linearGradient id="lg" x1=".3" y1="0" x2=".7" y2="1"><stop stop-color="#a0aaff"/><stop offset="1" stop-color="#6070ef"/></linearGradient></defs><g stroke="url(#lg)" stroke-width="6" stroke-linecap="round"><line x1="22" y1="88" x2="31" y2="64"/><line x1="36" y1="52" x2="50" y2="15"/><line x1="9" y1="58" x2="59.5" y2="58"/><line x1="73.5" y1="58" x2="91" y2="58"/><line x1="50" y1="15" x2="78" y2="88"/></g></svg>
     <h1>Airloom</h1>
+    <div class="theme-switch" id="themeSwitch">
+      <button class="theme-btn" data-mode="light" title="Light">Light</button>
+      <button class="theme-btn" data-mode="dark" title="Dark">Dark</button>
+      <button class="theme-btn active" data-mode="system" title="System">Auto</button>
+    </div>
   </div>
   <div class="card">
     <div class="status"><div class="dot wait" id="dot"></div><span id="statusText">Initializing...</span></div>
@@ -558,9 +568,43 @@ const lightTheme = {
   brightBlack: '#6e6e73', brightRed: '#eb4d3d', brightGreen: '#36b738', brightYellow: '#b79a14',
   brightBlue: '#0451a5', brightMagenta: '#c42275', brightCyan: '#318495', brightWhite: '#f2f2f7',
 };
-function getTheme() { return matchMedia('(prefers-color-scheme:light)').matches ? lightTheme : darkTheme; }
-matchMedia('(prefers-color-scheme:light)').addEventListener('change', () => {
+
+// --- Theme management ---
+function isEffectivelyLight() {
+  const mode = document.documentElement.dataset.theme;
+  if (mode === 'light') return true;
+  if (mode === 'dark') return false;
+  return matchMedia('(prefers-color-scheme:light)').matches;
+}
+function getTheme() { return isEffectivelyLight() ? lightTheme : darkTheme; }
+
+function applyTheme(mode) {
+  if (mode === 'light' || mode === 'dark') {
+    document.documentElement.dataset.theme = mode;
+  } else {
+    delete document.documentElement.dataset.theme;
+    mode = 'system';
+  }
+  localStorage.setItem('airloom-theme', mode);
   if (term) term.options.theme = getTheme();
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+}
+
+// Restore saved preference (or default to system)
+applyTheme(localStorage.getItem('airloom-theme') || 'system');
+
+document.getElementById('themeSwitch').addEventListener('click', (e) => {
+  const btn = e.target.closest('.theme-btn');
+  if (btn) applyTheme(btn.dataset.mode);
+});
+matchMedia('(prefers-color-scheme:light)').addEventListener('change', () => {
+  // Only react if the user chose "system"
+  const saved = localStorage.getItem('airloom-theme');
+  if (!saved || saved === 'system') {
+    if (term) term.options.theme = getTheme();
+  }
 });
 
 function initTerminal() {
