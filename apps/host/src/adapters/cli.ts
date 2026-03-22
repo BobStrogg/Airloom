@@ -93,7 +93,7 @@ function resolveExecutable(command: string, envPath = process.env.PATH ?? ''): s
   }
   for (const dir of envPath.split(delimiter)) {
     if (!dir) continue;
-    const candidate = join(dir.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'), command);
+    const candidate = join(dir.replace(/^~(?=$|\/)/, process.env.HOME || process.env.USERPROFILE || '~'), command);
     if (existsSync(candidate)) return candidate;
   }
   return null;
