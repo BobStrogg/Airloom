@@ -45,10 +45,11 @@ html, body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
 }
 
-#app { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+#app { position: fixed; top: 0; left: 0; right: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; }
 .screen { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 .connect-content {
@@ -141,7 +142,6 @@ html, body {
   padding: 8px 10px max(10px, env(safe-area-inset-bottom, 0px));
   background: var(--term-bg);
   overflow: hidden;
-  touch-action: none;
 }
 
 #terminal {
@@ -160,9 +160,6 @@ html, body {
 
 #terminal .xterm-viewport {
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  overflow-y: auto !important;
-  touch-action: pan-y;
 }
 
 #qrReader { width: 100%; max-width: 360px; border-radius: 12px; overflow: hidden; }

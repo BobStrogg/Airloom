@@ -451,6 +451,7 @@ const HOST_HTML = `<!DOCTYPE html>
   .input-area{display:flex;gap:8px}
   .input-area textarea{flex:1;resize:none;min-height:44px;max-height:120px;padding:10px 14px;border-radius:8px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);font-family:inherit;font-size:.9rem}
   .terminal-container{background:var(--term-bg);border:1px solid var(--border);border-radius:8px;height:420px;overflow:hidden;margin-bottom:12px}
+  .terminal-container .xterm-viewport{overscroll-behavior:contain}
   #terminal{width:100%;height:100%;padding:8px}
   .toolbar{display:flex;gap:8px;margin-bottom:12px}
   .tool-btn{padding:6px 12px;font-size:.85rem;background:var(--tool-bg);border:none;border-radius:6px;color:var(--text);cursor:pointer}
