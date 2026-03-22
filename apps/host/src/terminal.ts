@@ -197,6 +197,10 @@ export class TerminalSession {
   private cols = 120;
   private rows = 36;
   private outputBuffer = '';
+  /** True after the first viewer has ever attached.  The pre-viewer output
+   *  buffer contains PTY startup junk (zsh PROMPT_SP "%", resize-triggered
+   *  prompt redraws) that shouldn't be replayed. */
+  private hasHadViewer = false;
 
   constructor(
     private readonly channel: Channel,
@@ -289,6 +293,17 @@ export class TerminalSession {
     if (!this.pty) {
       this.start();
     }
+
+    // On reconnection (not the first viewer), replay the output buffer so the
+    // viewer sees commands that ran while it was disconnected.  On the FIRST
+    // connect the buffer contains PTY startup junk (zsh PROMPT_SP "%",
+    // prompt redraws from host-side resizes) — skip that and rely on the
+    // SIGWINCH redraw below for a clean initial screen.
+    if (this.hasHadViewer && this.outputBuffer) {
+      this.stream.write(this.outputBuffer);
+    }
+    this.outputBuffer = '';
+    this.hasHadViewer = true;
 
     // Resize PTY to match new viewer dimensions.  This sends SIGWINCH to the
     // shell, which redraws the prompt (or the running program refreshes its UI).
