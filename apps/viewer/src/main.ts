@@ -306,11 +306,6 @@ function setTerminalStatus(text: string, className = 'status-badge') {
   terminalStatus.className = className;
 }
 
-function writeTerminalLine(text: string) {
-  if (!term) return;
-  term.writeln(text.replace(/\n/g, '\r\n'));
-}
-
 function resetConnectionUI() {
   terminalReady = false;
   connecting = false;
@@ -679,8 +674,6 @@ async function doConnect(
     });
     channel.on('peer_left', () => {
       setTerminalStatus('Disconnected', 'status-badge disconnected');
-      writeTerminalLine('');
-      writeTerminalLine('[host disconnected]');
     });
     channel.on('message', (data: unknown) => {
       if (!data || typeof data !== 'object' || !('type' in data)) return;
@@ -697,8 +690,7 @@ async function doConnect(
       if ((data as TerminalExitMessage).type === 'terminal_exit') {
         const exit = data as TerminalExitMessage;
         const detail = typeof exit.exitCode === 'number' ? `exit ${exit.exitCode}` : 'terminated';
-        writeTerminalLine('');
-        writeTerminalLine(`[terminal ${detail}]`);
+        debug(`[viewer] Terminal ${detail}`);
       }
     });
     channel.on('stream', (stream: ReadStream) => {
@@ -713,12 +705,10 @@ async function doConnect(
       });
       stream.on('end', () => {
         debug('[viewer] Stream ended');
-        writeTerminalLine('[session closed]');
       });
     });
     channel.on('error', (err: Error) => {
       console.error('Channel error:', err);
-      writeTerminalLine(`[error: ${err.message}]`);
     });
     channel.on('disconnect', () => setTerminalStatus('Reconnecting…', 'status-badge reconnecting'));
 
