@@ -27,12 +27,16 @@ test('parseHostEnv defaults to localhost-only hosting with the community Ably re
     HOST_PORT: undefined,
     HOST_BIND: undefined,
     VIEWER_URL: undefined,
+    SSH_CONNECTION: undefined,
+    SSH_TTY: undefined,
+    SSH_CLIENT: undefined,
   }, () => {
     const env = parseHostEnv();
     assert.equal(env.hostBind, '127.0.0.1');
     assert.equal(env.hostPort, 4000);
     assert.equal(env.useAbly, true);
     assert.equal(env.isDefaultAblyKey, true);
+    assert.equal(env.isSSH, false);
     assert.equal(env.viewerUrl, 'https://bobstrogg.github.io/Airloom/');
   });
 });
@@ -45,9 +49,23 @@ test('parseHostEnv defaults to 0.0.0.0 in dev mode for LAN phone access', () => 
     HOST_PORT: undefined,
     HOST_BIND: undefined,
     VIEWER_URL: undefined,
+    SSH_CONNECTION: undefined,
+    SSH_TTY: undefined,
+    SSH_CLIENT: undefined,
   }, () => {
     const env = parseHostEnv(undefined, true);
     assert.equal(env.hostBind, '0.0.0.0');
+  });
+});
+
+test('parseHostEnv defaults to 0.0.0.0 over SSH for remote browser access', () => {
+  withEnv({
+    HOST_BIND: undefined,
+    SSH_CONNECTION: '10.0.0.1 54321 10.0.0.2 22',
+  }, () => {
+    const env = parseHostEnv();
+    assert.equal(env.hostBind, '0.0.0.0');
+    assert.equal(env.isSSH, true);
   });
 });
 
