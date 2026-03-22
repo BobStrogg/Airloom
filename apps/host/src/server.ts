@@ -478,7 +478,7 @@ const HOST_HTML = `<!DOCTYPE html>
   #terminal{width:100%;height:100%;padding:8px;background:var(--term-bg)}
   #terminal .xterm,#terminal .xterm-viewport{background-color:var(--term-bg) !important}
   .toolbar{display:flex;gap:8px;margin-bottom:12px}
-  .tool-btn{padding:6px 12px;font-size:.85rem;background:var(--tool-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer}
+  .tool-btn{padding:6px 12px;font-size:.85rem;font-weight:normal;background:var(--tool-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer}
   .tool-btn:hover{background:var(--tool-hover)}
 </style>
 </head>
