@@ -134,6 +134,7 @@ html, body {
   border-radius: 999px;
   font-size: 0.85rem;
   background: var(--tool-btn-bg);
+  touch-action: manipulation;
 }
 
 .terminal-container {
