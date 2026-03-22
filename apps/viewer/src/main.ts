@@ -51,6 +51,8 @@ const upBtn = document.getElementById('upBtn')!;
 const downBtn = document.getElementById('downBtn')!;
 const leftBtn = document.getElementById('leftBtn')!;
 const rightBtn = document.getElementById('rightBtn')!;
+const fontDownBtn = document.getElementById('fontDownBtn')!;
+const fontUpBtn = document.getElementById('fontUpBtn')!;
 
 let channel: Channel | null = null;
 let term: Terminal | null = null;
@@ -144,7 +146,7 @@ function ensureTerminal() {
   term = new Terminal({
     cursorBlink: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: 14,
+    fontSize: getSavedFontSize(),
     lineHeight: 1.25,
     allowTransparency: true,
     scrollback: 5000,
@@ -339,6 +341,34 @@ leftBtn.addEventListener('click', () => {
 rightBtn.addEventListener('click', () => {
   term?.focus();
   if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x1b[C' } satisfies TerminalMessage);
+});
+
+const FONT_MIN = 8;
+const FONT_MAX = 24;
+const FONT_STEP = 1;
+const FONT_KEY = 'airloom:fontSize';
+
+function setFontSize(size: number) {
+  const clamped = Math.max(FONT_MIN, Math.min(FONT_MAX, size));
+  if (!term) return;
+  term.options.fontSize = clamped;
+  fitAndSyncTerminal();
+  try { localStorage.setItem(FONT_KEY, String(clamped)); } catch {}
+}
+
+function getSavedFontSize(): number {
+  try {
+    const v = localStorage.getItem(FONT_KEY);
+    if (v) { const n = Number(v); if (n >= FONT_MIN && n <= FONT_MAX) return n; }
+  } catch {}
+  return 14;
+}
+
+fontDownBtn.addEventListener('click', () => {
+  if (term) setFontSize(term.options.fontSize! - FONT_STEP);
+});
+fontUpBtn.addEventListener('click', () => {
+  if (term) setFontSize(term.options.fontSize! + FONT_STEP);
 });
 
 disconnectBtn.addEventListener('click', () => {
