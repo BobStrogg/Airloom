@@ -47,6 +47,10 @@ const focusTerminalBtn = document.getElementById('focusTerminalBtn')!;
 const ctrlCBtn = document.getElementById('ctrlCBtn')!;
 const escBtn = document.getElementById('escBtn')!;
 const tabBtn = document.getElementById('tabBtn')!;
+const upBtn = document.getElementById('upBtn')!;
+const downBtn = document.getElementById('downBtn')!;
+const leftBtn = document.getElementById('leftBtn')!;
+const rightBtn = document.getElementById('rightBtn')!;
 
 let channel: Channel | null = null;
 let term: Terminal | null = null;
@@ -319,6 +323,22 @@ escBtn.addEventListener('click', () => {
 tabBtn.addEventListener('click', () => {
   term?.focus();
   if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\t' } satisfies TerminalMessage);
+});
+upBtn.addEventListener('click', () => {
+  term?.focus();
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x1b[A' } satisfies TerminalMessage);
+});
+downBtn.addEventListener('click', () => {
+  term?.focus();
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x1b[B' } satisfies TerminalMessage);
+});
+leftBtn.addEventListener('click', () => {
+  term?.focus();
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x1b[D' } satisfies TerminalMessage);
+});
+rightBtn.addEventListener('click', () => {
+  term?.focus();
+  if (terminalReady && channel) channel.send({ type: 'terminal_input', data: '\x1b[C' } satisfies TerminalMessage);
 });
 
 disconnectBtn.addEventListener('click', () => {
