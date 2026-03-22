@@ -33,7 +33,7 @@
     --header-bg: rgba(255, 255, 255, 0.7);
     --header-border: rgba(0, 0, 0, 0.08);
     --toolbar-bg: rgba(242, 242, 247, 0.9);
-    --tool-btn-bg: #e5e5ea;
+    --tool-btn-bg: #d1d1d6;
     --term-bg: #ffffff;
     --term-border: #d1d1d6;
   }
@@ -75,7 +75,7 @@ html, body {
 }
 .primary-btn:hover { background: var(--accent-hover); }
 
-.secondary-btn, .tool-btn {
+.secondary-btn {
   padding: 12px 20px; background: var(--accent); color: #fff; border: none;
   border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
   white-space: nowrap;
@@ -133,7 +133,9 @@ html, body {
   padding: 8px 12px;
   border-radius: 999px;
   font-size: 0.85rem;
+  font-weight: normal;
   background: var(--tool-btn-bg);
+  border: 1px solid var(--border);
   touch-action: manipulation;
 }
 
@@ -157,6 +159,12 @@ html, body {
 #terminal .xterm {
   height: 100%;
   padding: 8px;
+}
+
+/* Override xterm.css hardcoded background-color:#000 so light mode works */
+#terminal .xterm,
+#terminal .xterm-viewport {
+  background-color: var(--term-bg) !important;
 }
 
 #qrReader { width: 100%; max-width: 360px; border-radius: 12px; overflow: hidden; }
