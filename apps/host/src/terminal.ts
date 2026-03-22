@@ -189,11 +189,6 @@ export function getTerminalLaunchDisplay(explicitCommand?: string): string {
 }
 
 const MAX_BUFFER_BYTES = 512 * 1024; // 512 KB scrollback
-// When replaying output to a newly-connected viewer, only send the tail of the
-// buffer. A full 512 KB replay floods the viewer with ancient history (including
-// zsh's initial PROMPT_SP "%" marker and hundreds of old prompts). 16 KB is
-// roughly 4–5 screens and is enough to reconstruct the current terminal state.
-const MAX_REPLAY_BYTES = 16 * 1024;
 
 export class TerminalSession {
   private pty: IPty | null = null;
@@ -281,8 +276,17 @@ export class TerminalSession {
     this.cols = Math.max(20, Math.floor(message.cols || this.cols));
     this.rows = Math.max(5, Math.floor(message.rows || this.rows));
 
-    // Resize PTY to match new viewer dimensions
-    this.pty?.resize(this.cols, this.rows);
+    // Resize PTY to match new viewer dimensions.  This sends SIGWINCH to the
+    // shell, which redraws the prompt (or the running program refreshes its UI).
+    // We intentionally do NOT replay the outputBuffer here — raw replay includes
+    // stale content from before the viewer connected (zsh's PROMPT_SP "%",
+    // earlier prompt redraws from host-side resizes, etc.).  A resize-triggered
+    // redraw gives the viewer a clean, current screen.
+    if (this.pty) {
+      // Force SIGWINCH even if dimensions haven't changed by toggling cols.
+      this.pty.resize(Math.max(20, this.cols - 1), this.rows);
+      this.pty.resize(this.cols, this.rows);
+    }
 
     // Close any existing stream for a previous connection
     this.detachStream();
@@ -291,14 +295,6 @@ export class TerminalSession {
     const meta: TerminalStreamMeta = { kind: 'terminal', cols: this.cols, rows: this.rows };
     this.stream = this.channel.createStream(meta as unknown as Record<string, unknown>);
     this.batcher = new AdaptiveOutputBatcher((data) => { this.stream?.write(data); });
-
-    // Replay recent scrollback so the viewer sees the current terminal state
-    if (this.outputBuffer) {
-      const replay = this.outputBuffer.length <= MAX_REPLAY_BYTES
-        ? this.outputBuffer
-        : this.outputBuffer.slice(this.outputBuffer.length - MAX_REPLAY_BYTES);
-      this.stream.write(replay);
-    }
 
     // If PTY exited since last connection, restart it
     if (!this.pty) {
