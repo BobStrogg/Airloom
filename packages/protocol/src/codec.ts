@@ -66,10 +66,99 @@ export function decodePairingData(str: string): PairingData {
   if (data.token !== undefined && typeof data.token !== 'string') {
     throw new Error('Invalid pairing data: token must be a string');
   }
+  if (data.tokenExpiresAt !== undefined && typeof data.tokenExpiresAt !== 'number') {
+    throw new Error('Invalid pairing data: tokenExpiresAt must be a number');
+  }
   if (data.transport === 'ably' && !data.token) {
     throw new Error('Invalid pairing data: Ably transport requires a token');
   }
   return data as PairingData;
+}
+
+const BASE64_URL_PAYLOAD_RE = /^[A-Za-z0-9_-]+={0,2}$/;
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+
+function isValidBase64UrlPayload(str: string): boolean {
+  if (!BASE64_URL_PAYLOAD_RE.test(str)) return false;
+  const paddingLength = str.match(/=+$/)?.[0].length ?? 0;
+  const unpaddedLength = str.length - paddingLength;
+  if (unpaddedLength === 0) return false;
+
+  const remainder = unpaddedLength % 4;
+  if (remainder === 1) return false;
+  if (paddingLength === 1) return remainder === 3;
+  if (paddingLength === 2) return remainder === 2;
+  return paddingLength === 0;
+}
+
+function decodeBase64UrlUtf8(str: string): string {
+  if (!isValidBase64UrlPayload(str)) {
+    throw new Error('Invalid pairing data: malformed encoded payload');
+  }
+  const normalized = str.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4 || 4)) % 4);
+  return utf8Decoder.decode(fromBase64(padded));
+}
+
+function decodeEncodedPairingData(encoded: string): PairingData {
+  try {
+    return decodePairingData(decodeBase64UrlUtf8(encoded));
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Invalid pairing data:')) {
+      throw err;
+    }
+    throw new Error('Invalid pairing data: malformed encoded payload');
+  }
+}
+
+/**
+ * Decode pairing input from any viewer entry point.
+ *
+ * Supported forms:
+ * - Raw JSON pairing payload
+ * - Base64url-encoded pairing payload
+ * - Full QR URL ending in `#<base64url-payload>`
+ * - Raw hash fragment (with or without leading `#`)
+ *
+ * For QR URLs, only the hash payload is trusted; path, query, and origin are
+ * treated as transport details for opening the viewer, not pairing metadata.
+ */
+export function parsePairingInput(input: string): PairingData {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error('Invalid pairing data: empty input');
+  }
+  if (trimmed.startsWith('{')) {
+    return decodePairingData(trimmed);
+  }
+
+  if (trimmed.startsWith('#')) {
+    const encoded = trimmed.slice(1);
+    if (!encoded) {
+      throw new Error('Invalid pairing data: empty hash payload');
+    }
+    return decodeEncodedPairingData(encoded);
+  }
+
+  if (trimmed.includes('://')) {
+    let url: URL;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      throw new Error('Invalid pairing data: malformed QR URL');
+    }
+    const encoded = url.hash.slice(1);
+    if (!encoded) {
+      throw new Error('Invalid pairing data: URL is missing a hash payload');
+    }
+    return decodeEncodedPairingData(encoded);
+  }
+
+  return decodeEncodedPairingData(trimmed);
+}
+
+export function decodePairingInput(input: string): PairingData {
+  return parsePairingInput(input);
 }
 
 // Generate a random alphanumeric string

@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
+import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Channel } from '@airloom/channel';
 import { Batcher } from '@airloom/channel';
@@ -11,6 +12,7 @@ import { CLIAdapter, CLI_PRESETS } from './adapters/cli.js';
 import { loadConfig, saveConfig } from './config.js';
 import { getTerminalLaunchDisplay } from './terminal.js';
 import type { SavedConfig } from './config.js';
+import { CONTROL_COOKIE_NAME, FixedWindowRateLimiter, hasAllowedOrigin, hasValidControlToken, readControlToken } from './security.js';
 
 export interface ServerState {
   channel: Channel | null;
@@ -23,8 +25,10 @@ export interface ServerState {
   terminalLaunchCommand?: string;
   messages: Array<{ role: string; content: string; timestamp: number }>;
   terminal?: { writeRawInput(data: string): void; handleMessage(msg: unknown): void };
-  sessionToken?: string;
+  pairingSessionToken?: string;
+  relaySessionToken?: string;
   ablyToken?: string;
+  ablyTokenExpiresAt?: number;
   transport?: 'ably' | 'ws';
 }
 
@@ -49,24 +53,104 @@ export function enqueueAIResponse(
 
 export function createHostServer(opts: {
   port: number;
+  bind: string;
+  controlToken: string;
   state: ServerState;
   viewerDir?: string;
 }) {
   const app = express();
   const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ noServer: true });
   const uiClients = new Set<WebSocket>();
+  const rateLimiter = new FixedWindowRateLimiter();
 
-  app.use(express.json());
+  function requestKey(req: express.Request): string {
+    return req.ip || req.socket.remoteAddress || 'unknown';
+  }
 
-  app.get('/', (_req, res) => { res.type('html').send(HOST_HTML); });
+  function setControlCookie(req: express.Request, res: express.Response): void {
+    const parts = [
+      `${CONTROL_COOKIE_NAME}=${encodeURIComponent(opts.controlToken)}`,
+      'HttpOnly',
+      'SameSite=Strict',
+      'Path=/',
+    ];
+    if (req.secure) parts.push('Secure');
+    res.setHeader('Set-Cookie', parts.join('; '));
+  }
+
+  function requireSameOrigin(req: express.Request, res: express.Response): boolean {
+    const host = req.get('host');
+    if (!host || !hasAllowedOrigin(req.headers, host)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return false;
+    }
+    return true;
+  }
+
+  function requireControlAuth(req: express.Request, res: express.Response): boolean {
+    if (!requireSameOrigin(req, res)) return false;
+    if (!hasValidControlToken(req, opts.controlToken)) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return false;
+    }
+    if (readControlToken(req) === opts.controlToken) setControlCookie(req, res);
+    return true;
+  }
+
+  function requireRateLimit(req: express.Request, res: express.Response, bucket: string, max: number, windowMs: number): boolean {
+    if (rateLimiter.allow(`${bucket}:${requestKey(req)}`, max, windowMs)) return true;
+    res.status(429).json({ error: 'Rate limited' });
+    return false;
+  }
+
+  function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
+    socket.write(`HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(message)}\r\n\r\n${message}`);
+    socket.destroy();
+  }
+
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '16kb' }));
+  app.use((_req, res, next) => {
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    next();
+  });
+
+  app.get('/healthz', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, connected: opts.state.connected, transport: opts.state.transport ?? 'ws' });
+  });
 
   // Serve viewer app under /viewer/ (static files from viewer build)
   if (opts.viewerDir && existsSync(opts.viewerDir)) {
     app.use('/viewer', express.static(opts.viewerDir));
   }
 
-  app.get('/api/status', (_req, res) => {
+  app.get('/', (req, res) => {
+    if (!requireRateLimit(req, res, 'root', 20, 60_000)) return;
+    const host = req.get('host');
+    if (!host || !hasAllowedOrigin(req.headers, host)) {
+      res.status(403).type('text/plain').send('Forbidden');
+      return;
+    }
+    if (!hasValidControlToken(req, opts.controlToken)) {
+      res.status(401).type('text/plain').send('Unauthorized. Open the tokenized Airloom URL printed by the host process.');
+      return;
+    }
+    setControlCookie(req, res);
+    if (typeof req.query.t === 'string') {
+      res.redirect('/');
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('html').send(HOST_HTML);
+  });
+
+  app.get('/api/status', (req, res) => {
+    if (!requireRateLimit(req, res, 'status', 60, 60_000) || !requireControlAuth(req, res)) return;
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
       connected: opts.state.connected,
       pairingCode: opts.state.pairingCode,
@@ -78,11 +162,16 @@ export function createHostServer(opts: {
     });
   });
 
-  app.get('/api/cli-presets', (_req, res) => { res.json(CLI_PRESETS); });
+  app.get('/api/cli-presets', (req, res) => {
+    if (!requireRateLimit(req, res, 'cli-presets', 60, 60_000) || !requireControlAuth(req, res)) return;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(CLI_PRESETS);
+  });
 
-  app.get('/api/config', (_req, res) => {
+  app.get('/api/config', (req, res) => {
+    if (!requireRateLimit(req, res, 'config-get', 60, 60_000) || !requireControlAuth(req, res)) return;
     const saved = loadConfig();
-    // Also surface env-var API keys so UI can show "from env" hint
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
       saved,
       envKeys: {
@@ -92,30 +181,50 @@ export function createHostServer(opts: {
     });
   });
 
+  const allowedPresetIds = new Set(['shell', ...CLI_PRESETS.map((preset) => preset.id)]);
+
+  function readString(value: unknown, maxLength: number): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    return trimmed.length <= maxLength ? trimmed : undefined;
+  }
+
   app.post('/api/configure', (req, res) => {
+    if (!requireRateLimit(req, res, 'configure', 10, 60_000) || !requireControlAuth(req, res)) return;
+    res.setHeader('Cache-Control', 'no-store');
     const { type, apiKey, model, command, preset } = req.body;
+    if (type !== 'anthropic' && type !== 'openai' && type !== 'cli') {
+      res.status(400).json({ error: 'Unknown adapter type' });
+      return;
+    }
+    const normalizedApiKey = readString(apiKey, 512);
+    const normalizedModel = readString(model, 200);
+    const normalizedCommand = readString(command, 512);
+    const selectedPreset = typeof preset === 'string' ? preset : 'shell';
+    if (!allowedPresetIds.has(selectedPreset)) {
+      res.status(400).json({ error: 'Unknown preset' });
+      return;
+    }
     try {
       switch (type) {
         case 'anthropic': {
-          const key = apiKey || process.env.ANTHROPIC_API_KEY;
+          const key = normalizedApiKey || process.env.ANTHROPIC_API_KEY;
           if (!key) { res.status(400).json({ error: 'API key required (or set ANTHROPIC_API_KEY env var)' }); return; }
-          opts.state.adapter = new AnthropicAdapter({ apiKey: key, model });
+          opts.state.adapter = new AnthropicAdapter({ apiKey: key, model: normalizedModel });
           break;
         }
         case 'openai': {
-          const key = apiKey || process.env.OPENAI_API_KEY;
+          const key = normalizedApiKey || process.env.OPENAI_API_KEY;
           if (!key) { res.status(400).json({ error: 'API key required (or set OPENAI_API_KEY env var)' }); return; }
-          opts.state.adapter = new OpenAIAdapter({ apiKey: key, model });
+          opts.state.adapter = new OpenAIAdapter({ apiKey: key, model: normalizedModel });
           break;
         }
         case 'cli': {
-          const selectedPreset = typeof preset === 'string' ? preset : 'shell';
           const presetInfo = CLI_PRESETS.find((p) => p.id === selectedPreset);
           const cmd = selectedPreset === 'shell'
             ? undefined
-            : (typeof command === 'string' && command.trim())
-              ? command.trim()
-              : presetInfo?.command;
+            : (normalizedCommand ?? presetInfo?.command);
           opts.state.terminalLaunchCommand = cmd;
           opts.state.terminalLaunch = getTerminalLaunchDisplay(cmd);
           opts.state.adapter = null;
@@ -125,11 +234,10 @@ export function createHostServer(opts: {
           res.json({ ok: true, terminalLaunch: opts.state.terminalLaunch });
           return;
         }
-        default: res.status(400).json({ error: 'Unknown adapter type' }); return;
       }
       const cfg: SavedConfig = { type };
-      if (model) cfg.model = model;
-      if (type === 'cli') { cfg.command = command; cfg.preset = preset; }
+      if (normalizedModel) cfg.model = normalizedModel;
+      if (type === 'cli') { cfg.command = normalizedCommand; cfg.preset = selectedPreset; }
       saveConfig(cfg);
       broadcast({ type: 'configured', adapter: { name: opts.state.adapter?.name ?? 'none', model: opts.state.adapter?.model ?? '' } });
       res.json({ ok: true });
@@ -140,7 +248,9 @@ export function createHostServer(opts: {
   });
 
   app.post('/api/send', async (req, res) => {
-    const { content } = req.body;
+    if (!requireRateLimit(req, res, 'send', 30, 60_000) || !requireControlAuth(req, res)) return;
+    res.setHeader('Cache-Control', 'no-store');
+    const content = readString(req.body?.content, 4000);
     if (!content) { res.status(400).json({ error: 'No content' }); return; }
 
     opts.state.messages.push({ role: 'user', content, timestamp: Date.now() });
@@ -153,34 +263,79 @@ export function createHostServer(opts: {
     res.json({ ok: true });
   });
 
-  // Allows the phone to exchange an 8-character pairing code for the current
-  // Ably session token without needing to re-scan the QR code.
   app.get('/api/pair', (req, res) => {
+    if (!requireRateLimit(req, res, 'pair', 12, 60_000)) return;
+    const host = req.get('host');
+    if (!host || !hasAllowedOrigin(req.headers, host)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
     const { session } = req.query as Record<string, string>;
-    if (!session || session !== opts.state.sessionToken) {
+    if (!session || !/^[0-9a-f]{32}$/i.test(session) || session !== opts.state.pairingSessionToken) {
       res.status(401).json({ error: 'Invalid session' });
       return;
     }
+    if (!opts.state.relaySessionToken) {
+      res.status(503).json({ error: 'Pairing unavailable' });
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
+      session: opts.state.relaySessionToken,
       token: opts.state.ablyToken,
+      tokenExpiresAt: opts.state.ablyTokenExpiresAt,
       transport: opts.state.transport ?? 'ws',
       relay: opts.state.relayUrl,
+    });
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    const host = req.headers.host;
+    if (!host) {
+      rejectUpgrade(socket, 400, 'Bad Request');
+      return;
+    }
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', `http://${host}`);
+    } catch {
+      rejectUpgrade(socket, 400, 'Bad Request');
+      return;
+    }
+    if (url.pathname !== '/ws') {
+      socket.destroy();
+      return;
+    }
+    if (!hasAllowedOrigin(req.headers, host)) {
+      rejectUpgrade(socket, 403, 'Forbidden');
+      return;
+    }
+    if (!hasValidControlToken(req, opts.controlToken)) {
+      rejectUpgrade(socket, 401, 'Unauthorized');
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
     });
   });
 
   wss.on('connection', (ws) => {
     uiClients.add(ws);
     ws.on('close', () => uiClients.delete(ws));
-    
-    // Handle messages from the host web UI.
-    // Only forward terminal_input — terminal_open/resize are exclusively driven
-    // by the phone (channel) so the PTY/stream are never created prematurely.
+
     ws.on('message', (data) => {
       try {
+        if (data.toString().length > 16_384) return;
         const message = JSON.parse(data.toString());
-        if (message.type === 'terminal_input' && typeof message.data === 'string') {
+        if (message.type === 'terminal_input' && typeof message.data === 'string' && message.data.length <= 8_192) {
           opts.state.terminal?.writeRawInput(message.data);
-        } else if (message.type === 'terminal_resize') {
+        } else if (
+          message.type === 'terminal_resize'
+          && Number.isInteger(message.cols)
+          && Number.isInteger(message.rows)
+          && message.cols > 0
+          && message.rows > 0
+        ) {
           opts.state.terminal?.handleMessage(message);
         }
       } catch (err) {
@@ -197,7 +352,7 @@ export function createHostServer(opts: {
   }
 
   return new Promise<{ server: ReturnType<typeof createServer>; broadcast: typeof broadcast; port: number }>((resolve) => {
-    server.listen(opts.port, '0.0.0.0', () => {
+    server.listen(opts.port, opts.bind, () => {
       const addr = server.address();
       const actualPort = typeof addr === 'object' && addr ? addr.port : opts.port;
       resolve({ server, broadcast, port: actualPort });

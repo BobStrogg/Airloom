@@ -22,6 +22,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:pages": "vite build --config vite.config.pages.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --import tsx --test src/pairing.test.ts"
   }
 }
