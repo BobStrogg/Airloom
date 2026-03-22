@@ -21,6 +21,19 @@ function debug(msg: string) {
   console.log(msg);
 }
 
+// Surface uncaught errors / rejections so the user sees a message instead of
+// a blank white page.  This is especially important on mobile where devtools
+// aren't easily accessible.
+window.addEventListener('error', (e) => {
+  const el = document.getElementById('connectError');
+  if (el) { el.textContent = `Error: ${e.message}`; el.style.display = 'block'; }
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason instanceof Error ? e.reason.message : String(e.reason);
+  const el = document.getElementById('connectError');
+  if (el) { el.textContent = `Error: ${msg}`; el.style.display = 'block'; }
+});
+
 // Unregister any previously-installed service worker so stale cached
 // versions of the viewer don't block updates.
 if ('serviceWorker' in navigator) {
