@@ -158,10 +158,6 @@ html, body {
   padding: 8px;
 }
 
-#terminal .xterm-viewport {
-  overscroll-behavior: contain;
-}
-
 #qrReader { width: 100%; max-width: 360px; border-radius: 12px; overflow: hidden; }
 #qrReader video { border-radius: 12px; }
 

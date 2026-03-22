@@ -165,6 +165,30 @@ function ensureTerminal() {
     channel.send({ type: 'terminal_input', data } satisfies TerminalMessage);
   });
   terminalContainer.addEventListener('click', () => term?.focus());
+
+  // xterm.js v6 uses a VS Code-style scrollable element that only handles
+  // `wheel` events — touch scrolling is not supported out of the box.  Wire up
+  // a simple touch-to-scroll bridge so mobile users can scroll the terminal.
+  {
+    let touchY: number | null = null;
+    const cellH = () => term!.options.lineHeight! * term!.options.fontSize!;
+    terminalEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) touchY = e.touches[0].clientY;
+    }, { passive: true });
+    terminalEl.addEventListener('touchmove', (e) => {
+      if (touchY === null || e.touches.length !== 1 || !term) return;
+      const dy = touchY - e.touches[0].clientY;
+      const lines = Math.trunc(dy / cellH());
+      if (lines !== 0) {
+        term.scrollLines(lines);
+        touchY = e.touches[0].clientY;
+      }
+      e.preventDefault();
+    }, { passive: false });
+    terminalEl.addEventListener('touchend', () => { touchY = null; }, { passive: true });
+    terminalEl.addEventListener('touchcancel', () => { touchY = null; }, { passive: true });
+  }
+
   resizeObserver = new ResizeObserver(() => fitAndSyncTerminal());
   resizeObserver.observe(terminalContainer);
 }
